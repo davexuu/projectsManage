@@ -1,0 +1,599 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Stage {
+  启动
+  规划
+  执行
+  验收
+}
+
+enum TaskStatus {
+  未开始
+  进行中
+  已完成
+  延期
+}
+
+enum TrafficLight {
+  绿
+  黄
+  红
+}
+
+enum YesNo {
+  是
+  否
+}
+
+enum UserRole {
+  ADMIN
+  PM
+  MEMBER
+}
+
+enum AccessRole {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+enum SysStatus {
+  ENABLED
+  DISABLED
+}
+
+enum MenuType {
+  DIRECTORY
+  MENU
+  BUTTON
+}
+
+enum DataScope {
+  ALL
+  ORG_AND_CHILD
+  ORG
+  SELF
+  CUSTOM
+}
+
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  displayName  String
+  role         UserRole @default(MEMBER)
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model SysArea {
+  id        String    @id @default(cuid())
+  code      String    @unique
+  name      String
+  fullName  String?
+  parentId  String?
+  level     Int       @default(1)
+  sort      Int       @default(0)
+  status    SysStatus @default(ENABLED)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  parent   SysArea?  @relation("SysAreaTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children SysArea[] @relation("SysAreaTree")
+
+  @@index([parentId])
+  @@index([level])
+  @@map("sys_area")
+}
+
+model SysConfig {
+  id          String    @id @default(cuid())
+  configKey   String    @unique
+  configValue String
+  valueType   String    @default("string")
+  remark      String?
+  status      SysStatus @default(ENABLED)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("sys_config")
+}
+
+model SysDataRule {
+  id            String    @id @default(cuid())
+  ruleCode      String    @unique
+  ruleName      String
+  target        String
+  conditionJson Json?
+  status        SysStatus @default(ENABLED)
+  remark        String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  roleRelations SysRoleDataRule[]
+
+  @@map("sys_datarule")
+}
+
+model SysDictType {
+  id        String    @id @default(cuid())
+  dictCode  String    @unique
+  dictName  String
+  status    SysStatus @default(ENABLED)
+  remark    String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  dictValues SysDictValue[]
+
+  @@map("sys_dict_type")
+}
+
+model SysDictValue {
+  id         String    @id @default(cuid())
+  dictTypeId String
+  dictLabel  String
+  dictValue  String
+  isDefault  Boolean   @default(false)
+  sort       Int       @default(0)
+  status     SysStatus @default(ENABLED)
+  remark     String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  dictType SysDictType @relation(fields: [dictTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([dictTypeId, dictValue])
+  @@index([dictTypeId])
+  @@map("sys_dict_value")
+}
+
+model SysFolder {
+  id         String    @id @default(cuid())
+  folderName String
+  folderPath String
+  parentId   String?
+  sort       Int       @default(0)
+  status     SysStatus @default(ENABLED)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  parent   SysFolder?  @relation("SysFolderTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children SysFolder[] @relation("SysFolderTree")
+  files    SysFile[]
+
+  @@unique([parentId, folderName])
+  @@index([parentId])
+  @@map("sys_folder")
+}
+
+model SysFile {
+  id         String    @id @default(cuid())
+  folderId   String?
+  fileName   String
+  fileKey    String    @unique
+  fileExt    String?
+  fileSize   BigInt
+  mimeType   String?
+  uploaderId String?
+  status     SysStatus @default(ENABLED)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  folder   SysFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  uploader SysUser?   @relation(fields: [uploaderId], references: [id], onDelete: SetNull)
+
+  @@index([folderId])
+  @@index([uploaderId])
+  @@map("sys_file")
+}
+
+model SysLoginCount {
+  id         String   @id @default(cuid())
+  statDate   DateTime @db.Date
+  loginCount Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([statDate])
+  @@map("sys_login_count")
+}
+
+model SysMenu {
+  id         String    @id @default(cuid())
+  menuCode   String?   @unique
+  menuName   String
+  menuType   MenuType
+  parentId   String?
+  path       String?
+  component  String?
+  permission String?
+  icon       String?
+  sort       Int       @default(0)
+  visible    Boolean   @default(true)
+  keepAlive  Boolean   @default(false)
+  status     SysStatus @default(ENABLED)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  parent   SysMenu?      @relation("SysMenuTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children SysMenu[]     @relation("SysMenuTree")
+  roles    SysRoleMenu[]
+
+  @@index([parentId])
+  @@index([menuType])
+  @@map("sys_menu")
+}
+
+model SysOffice {
+  id            String    @id @default(cuid())
+  officeCode    String    @unique
+  officeName    String
+  officeType    String    @default("DEPARTMENT")
+  grade         String?   @db.VarChar(32)
+  parentId      String?
+  parentIds     String?   @db.VarChar(2000)
+  areaId        String?
+  leader        String?
+  phone         String?
+  fax           String?
+  email         String?
+  address       String?
+  zipCode       String?   @db.VarChar(64)
+  sort          Int       @default(0)
+  status        SysStatus @default(ENABLED)
+  useable       String    @default("1") @db.Char(1)
+  primaryPerson String?
+  deputyPerson  String?
+  delFlag       Int       @default(0) @db.TinyInt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  parent   SysOffice?  @relation("SysOfficeTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children SysOffice[] @relation("SysOfficeTree")
+  users    SysUser[]
+  posts    SysPost[]
+
+  @@index([parentId])
+  @@index([delFlag])
+  @@index([officeType])
+  @@index([useable])
+  @@index([parentId, delFlag])
+  @@unique([parentId, officeName, delFlag])
+  @@map("sys_office")
+}
+
+model SysPost {
+  id        String    @id @default(cuid())
+  postCode  String    @unique
+  postName  String
+  officeId  String?
+  sort      Int       @default(0)
+  status    SysStatus @default(ENABLED)
+  remark    String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  office SysOffice?    @relation(fields: [officeId], references: [id], onDelete: SetNull)
+  users  SysUserPost[]
+
+  @@index([officeId])
+  @@map("sys_post")
+}
+
+model SysRole {
+  id        String    @id @default(cuid())
+  roleCode  String    @unique
+  roleName  String
+  dataScope DataScope @default(SELF)
+  sort      Int       @default(0)
+  status    SysStatus @default(ENABLED)
+  remark    String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  users         SysUserRole[]
+  menus         SysRoleMenu[]
+  dataRuleLinks SysRoleDataRule[]
+
+  @@map("sys_role")
+}
+
+model SysRoleDataRule {
+  id         String   @id @default(cuid())
+  roleId     String
+  dataRuleId String
+  createdAt  DateTime @default(now())
+
+  role     SysRole     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  dataRule SysDataRule @relation(fields: [dataRuleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, dataRuleId])
+  @@index([dataRuleId])
+  @@map("sys_role_datarule")
+}
+
+model SysRoleMenu {
+  id        String   @id @default(cuid())
+  roleId    String
+  menuId    String
+  createdAt DateTime @default(now())
+
+  role SysRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  menu SysMenu @relation(fields: [menuId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, menuId])
+  @@index([menuId])
+  @@map("sys_role_menu")
+}
+
+model SysSchedule {
+  id             String    @id @default(cuid())
+  scheduleName   String
+  cronExpression String
+  invokeTarget   String
+  payload        Json?
+  status         SysStatus @default(ENABLED)
+  lastRunAt      DateTime?
+  nextRunAt      DateTime?
+  failCount      Int       @default(0)
+  remark         String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@map("sys_schedule")
+}
+
+model SysUser {
+  id           String    @id @default(cuid())
+  username     String    @unique
+  displayName  String
+  passwordHash String
+  officeId     String?
+  mobile       String?
+  email        String?
+  status       SysStatus @default(ENABLED)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  office        SysOffice?    @relation(fields: [officeId], references: [id], onDelete: SetNull)
+  roles         SysUserRole[]
+  posts         SysUserPost[]
+  uploadedFiles SysFile[]
+  logs          SysLog[]
+
+  @@index([officeId])
+  @@map("sys_user")
+}
+
+model SysUserPost {
+  id        String   @id @default(cuid())
+  userId    String
+  postId    String
+  createdAt DateTime @default(now())
+
+  user SysUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post SysPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@index([postId])
+  @@map("sys_user_post")
+}
+
+model SysUserRole {
+  id        String   @id @default(cuid())
+  userId    String
+  roleId    String
+  createdAt DateTime @default(now())
+
+  user SysUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role SysRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@index([roleId])
+  @@map("sys_user_role")
+}
+
+model SysLog {
+  id            String   @id @default(cuid())
+  userId        String?
+  module        String?
+  action        String
+  requestUrl    String?
+  requestMethod String?
+  requestIp     String?
+  userAgent     String?
+  requestBody   Json?
+  responseBody  Json?
+  isSuccess     Boolean  @default(true)
+  errorMessage  String?
+  createdAt     DateTime @default(now())
+
+  user SysUser? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("sys_log")
+}
+
+model Project {
+  id              String   @id @default(uuid())
+  projectName     String
+  projectType     String
+  year            Int
+  leadDepartment  String
+  projectOwner    String
+  participants    String
+  background      String?
+  goal            String?
+  scope           String?
+  expectedOutcome String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  wbsTasks          WbsTask[]
+  milestones        Milestone[]
+  progressRecords   ProgressRecord[]
+  statusAssessments StatusAssessment[]
+  risks             RiskItem[]
+  changes           ChangeRequest[]
+  members           ProjectMember[]
+}
+
+model ProjectMember {
+  id         String     @id @default(uuid())
+  projectId  String
+  userId     String
+  accessRole AccessRole @default(VIEWER)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([projectId])
+}
+
+model WbsTask {
+  id                String     @id @default(uuid())
+  projectId         String
+  level1Stage       Stage
+  level2WorkPackage String
+  taskName          String
+  taskDetail        String
+  deliverable       String
+  taskOwner         String
+  plannedStartDate  DateTime
+  plannedEndDate    DateTime
+  currentStatus     TaskStatus
+  isCritical        YesNo
+  riskHint          String?
+  linkedMasterTask  String?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+model Milestone {
+  id                 String     @id @default(uuid())
+  projectId          String
+  milestoneCode      String
+  milestoneName      String
+  level1Stage        Stage
+  relatedWorkPackage String
+  keyOutcome         String
+  doneCriteria       String
+  plannedFinishDate  DateTime
+  actualFinishDate   DateTime?
+  owner              String
+  currentStatus      TaskStatus
+  note               String?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+model ProgressRecord {
+  id                 String   @id @default(uuid())
+  projectId          String
+  statPeriod         DateTime
+  currentStage       Stage
+  milestoneCode      String
+  finishedWork       String
+  overallProgressPct Float
+  issuesAndRisks     String
+  needsCoordination  String
+  nextPlan           String
+  recorder           String
+  recordDate         DateTime
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+model StatusAssessment {
+  id              String       @id @default(uuid())
+  projectId       String
+  evalPeriod      DateTime
+  currentStage    Stage
+  overallStatus   TrafficLight
+  scheduleStatus  TrafficLight
+  qualityStatus   TrafficLight
+  riskStatus      TrafficLight
+  assessmentBasis String
+  watchItems      String
+  assessor        String
+  assessmentDate  DateTime
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+model RiskItem {
+  id                    String     @id @default(uuid())
+  projectId             String
+  riskCode              String
+  riskType              String
+  stage                 Stage
+  description           String
+  impactLevel           String
+  mitigationPlan        String
+  owner                 String
+  plannedResolveDate    DateTime
+  currentStatus         TaskStatus
+  actualResolveDate     DateTime?
+  escalateToManagement  YesNo
+  linkedMilestoneOrTask String?
+  note                  String?
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+model ChangeRequest {
+  id                    String     @id @default(uuid())
+  projectId             String
+  changeCode            String
+  changeType            String
+  requestDate           DateTime
+  requester             String
+  reason                String
+  beforeContent         String
+  afterContent          String
+  impactAnalysis        String
+  impactsMilestoneOrWbs YesNo
+  evaluationConclusion  String
+  approver              String?
+  approvalDate          DateTime?
+  currentStatus         TaskStatus
+  note                  String?
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
