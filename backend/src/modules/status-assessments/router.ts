@@ -36,3 +36,13 @@ statusAssessmentsRouter.put(
     res.json(await store.updateStatusAssessment(req.params.id, input));
   })
 );
+
+statusAssessmentsRouter.delete(
+  "/status-assessments/:id",
+  requireRole(["ADMIN", "PM"]),
+  requireProjectAccess(projectIdFromQuery, [AccessRole.OWNER, AccessRole.EDITOR]),
+  ah(async (req, res) => {
+    await store.deleteStatusAssessment(req.params.id);
+    res.json({ ok: true });
+  })
+);

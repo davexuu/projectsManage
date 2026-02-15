@@ -162,6 +162,10 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(payload)
     }),
+  delete: (endpoint: string, id: string, projectId?: string) =>
+    request<unknown>(`/${endpoint}/${id}${projectId ? `?projectId=${projectId}` : ""}`, {
+      method: "DELETE"
+    }),
   previewImport: (filePath: string) =>
     request<{
       summary: Record<string, unknown>;

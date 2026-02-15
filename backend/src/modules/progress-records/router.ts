@@ -36,3 +36,13 @@ progressRecordsRouter.put(
     res.json(await store.updateProgressRecord(req.params.id, input));
   })
 );
+
+progressRecordsRouter.delete(
+  "/progress-records/:id",
+  requireRole(["ADMIN", "PM", "MEMBER"]),
+  requireProjectAccess(projectIdFromQuery, [AccessRole.OWNER, AccessRole.EDITOR]),
+  ah(async (req, res) => {
+    await store.deleteProgressRecord(req.params.id);
+    res.json({ ok: true });
+  })
+);

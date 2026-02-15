@@ -36,3 +36,13 @@ changesRouter.put(
     res.json(await store.updateChange(req.params.id, input));
   })
 );
+
+changesRouter.delete(
+  "/changes/:id",
+  requireRole(["ADMIN", "PM"]),
+  requireProjectAccess(projectIdFromQuery, [AccessRole.OWNER, AccessRole.EDITOR]),
+  ah(async (req, res) => {
+    await store.deleteChange(req.params.id);
+    res.json({ ok: true });
+  })
+);

@@ -36,3 +36,13 @@ risksRouter.put(
     res.json(await store.updateRisk(req.params.id, input));
   })
 );
+
+risksRouter.delete(
+  "/risks/:id",
+  requireRole(["ADMIN", "PM"]),
+  requireProjectAccess(projectIdFromQuery, [AccessRole.OWNER, AccessRole.EDITOR]),
+  ah(async (req, res) => {
+    await store.deleteRisk(req.params.id);
+    res.json({ ok: true });
+  })
+);

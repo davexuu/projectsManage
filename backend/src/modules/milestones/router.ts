@@ -36,3 +36,13 @@ milestonesRouter.put(
     res.json(await store.updateMilestone(req.params.id, input));
   })
 );
+
+milestonesRouter.delete(
+  "/milestones/:id",
+  requireRole(["ADMIN", "PM"]),
+  requireProjectAccess(projectIdFromQuery, [AccessRole.OWNER, AccessRole.EDITOR]),
+  ah(async (req, res) => {
+    await store.deleteMilestone(req.params.id);
+    res.json({ ok: true });
+  })
+);

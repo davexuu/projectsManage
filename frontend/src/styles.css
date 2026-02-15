@@ -265,6 +265,24 @@ small {
   min-height: 0 !important;
 }
 
+.entity-s2 {
+  border: 1px solid #e4e7ec;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.entity-s2 .s2-container {
+  min-height: 360px;
+}
+
+.entity-s2-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 12px 2px;
+  border-top: 1px solid #edf2f7;
+}
+
 .entity-table .ant-table-container {
   border: 1px solid #e4e7ec;
   border-radius: 10px;

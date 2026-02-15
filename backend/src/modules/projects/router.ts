@@ -47,6 +47,15 @@ projectsRouter.put(
   })
 );
 
+projectsRouter.delete(
+  "/projects/:id",
+  requireRole(["ADMIN", "PM"]),
+  ah(async (req, res) => {
+    await store.deleteProject(req.params.id);
+    res.json({ ok: true });
+  })
+);
+
 projectsRouter.get(
   "/projects/:projectId/dashboard",
   requireProjectAccess(projectIdFromParams),

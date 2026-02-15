@@ -531,6 +531,11 @@ export class PrismaStore {
     return normalizeProject(row);
   }
 
+  async deleteProject(id: string): Promise<Project> {
+    const row = await prisma.project.delete({ where: { id } });
+    return normalizeProject(row);
+  }
+
   async listWbs(projectId?: string, allowedProjectIds?: string[]): Promise<WbsTask[]> {
     return prisma.wbsTask.findMany({
       where: whereProjectFilter(projectId, allowedProjectIds),
@@ -559,6 +564,10 @@ export class PrismaStore {
         plannedEndDate: toDate(input.plannedEndDate)
       }
     }) as unknown as Promise<WbsTask>;
+  }
+
+  async deleteWbs(id: string): Promise<WbsTask> {
+    return prisma.wbsTask.delete({ where: { id } }) as unknown as Promise<WbsTask>;
   }
 
   async listMilestones(projectId?: string, allowedProjectIds?: string[]): Promise<Milestone[]> {
@@ -599,6 +608,10 @@ export class PrismaStore {
     }) as unknown as Promise<Milestone>;
   }
 
+  async deleteMilestone(id: string): Promise<Milestone> {
+    return prisma.milestone.delete({ where: { id } }) as unknown as Promise<Milestone>;
+  }
+
   async listProgressRecords(projectId?: string, allowedProjectIds?: string[]): Promise<ProgressRecord[]> {
     return prisma.progressRecord.findMany({
       where: whereProjectFilter(projectId, allowedProjectIds),
@@ -636,6 +649,10 @@ export class PrismaStore {
         recordDate: toDate(input.recordDate)
       }
     }) as unknown as Promise<ProgressRecord>;
+  }
+
+  async deleteProgressRecord(id: string): Promise<ProgressRecord> {
+    return prisma.progressRecord.delete({ where: { id } }) as unknown as Promise<ProgressRecord>;
   }
 
   async listStatusAssessments(projectId?: string, allowedProjectIds?: string[]): Promise<StatusAssessment[]> {
@@ -681,6 +698,10 @@ export class PrismaStore {
     }) as unknown as Promise<StatusAssessment>;
   }
 
+  async deleteStatusAssessment(id: string): Promise<StatusAssessment> {
+    return prisma.statusAssessment.delete({ where: { id } }) as unknown as Promise<StatusAssessment>;
+  }
+
   async listRisks(projectId?: string, allowedProjectIds?: string[]): Promise<RiskItem[]> {
     return prisma.riskItem.findMany({
       where: whereProjectFilter(projectId, allowedProjectIds),
@@ -717,6 +738,10 @@ export class PrismaStore {
         actualResolveDate: input.actualResolveDate ? toDate(input.actualResolveDate) : null
       }
     }) as unknown as Promise<RiskItem>;
+  }
+
+  async deleteRisk(id: string): Promise<RiskItem> {
+    return prisma.riskItem.delete({ where: { id } }) as unknown as Promise<RiskItem>;
   }
 
   async listChanges(projectId?: string, allowedProjectIds?: string[]): Promise<ChangeRequest[]> {
@@ -756,6 +781,10 @@ export class PrismaStore {
         approvalDate: input.approvalDate ? toDate(input.approvalDate) : null
       }
     }) as unknown as Promise<ChangeRequest>;
+  }
+
+  async deleteChange(id: string): Promise<ChangeRequest> {
+    return prisma.changeRequest.delete({ where: { id } }) as unknown as Promise<ChangeRequest>;
   }
 
   async getProjectDashboard(projectId: string) {

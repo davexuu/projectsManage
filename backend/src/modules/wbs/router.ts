@@ -36,3 +36,13 @@ wbsRouter.put(
     res.json(await store.updateWbs(req.params.id, input));
   })
 );
+
+wbsRouter.delete(
+  "/wbs/:id",
+  requireRole(["ADMIN", "PM"]),
+  requireProjectAccess(projectIdFromQuery, [AccessRole.OWNER, AccessRole.EDITOR]),
+  ah(async (req, res) => {
+    await store.deleteWbs(req.params.id);
+    res.json({ ok: true });
+  })
+);

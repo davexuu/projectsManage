@@ -144,6 +144,7 @@ interface ModuleRouteProps {
   onModuleChange: (moduleKey: string) => void;
   onCreate: (payload: Record<string, unknown>, moduleKey: string) => Promise<void>;
   onUpdate: (payload: Record<string, unknown>, moduleKey: string, id: string) => Promise<void>;
+  onDelete: (moduleKey: string, id: string, projectId?: string) => Promise<void>;
 }
 
 function ModuleRoute({
@@ -158,7 +159,8 @@ function ModuleRoute({
   rows,
   onModuleChange,
   onCreate,
-  onUpdate
+  onUpdate,
+  onDelete
 }: ModuleRouteProps) {
   const params = useParams();
   const moduleKey = params.moduleKey || "projects";
@@ -262,6 +264,43 @@ function ModuleRoute({
     });
   }, [module.key, fields, dictItems, departmentOptions, userOptions, yearOptions]);
 
+  const handleDeleteOne = (row: Record<string, unknown>) => {
+    const rowId = String(row.id ?? "");
+    if (!rowId) return;
+    const projectId =
+      module.key === "projects" ? undefined : String(row.projectId ?? selectedProjectId ?? "").trim() || undefined;
+    Modal.confirm({
+      title: "确认删除该记录？",
+      content: "删除后不可恢复。",
+      okButtonProps: { danger: true },
+      onOk: () => onDelete(module.key, rowId, projectId).catch((e) => message.error(getErrorMessage(e)))
+    });
+  };
+
+  const handleBatchDelete = (selectedRows: Record<string, unknown>[]) => {
+    const ids = selectedRows
+      .map((row) => ({
+        id: String(row.id ?? "").trim(),
+        projectId: module.key === "projects" ? undefined : String(row.projectId ?? selectedProjectId ?? "").trim() || undefined
+      }))
+      .filter((item) => Boolean(item.id));
+    const tasks = ids.map((item) => () => onDelete(module.key, item.id, item.projectId));
+    if (tasks.length === 0) return;
+    Modal.confirm({
+      title: `确认删除选中的 ${tasks.length} 条记录？`,
+      content: "删除后不可恢复。",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          await Promise.all(tasks.map((fn) => fn()));
+          message.success(`已删除 ${tasks.length} 条记录`);
+        } catch (e) {
+          message.error(getErrorMessage(e));
+        }
+      }
+    });
+  };
+
   return (
     <>
       {needProject && !selectedProjectId ? <Card style={{ marginBottom: 16 }}>请选择项目后再录入该模块。</Card> : null}
@@ -363,6 +402,8 @@ function ModuleRoute({
         rows={filteredRows}
         columnLabels={columnLabels}
         onEdit={dynamicFields.length > 0 ? (row) => { setEditingRow(row); setDialogOpen(true); } : undefined}
+        onDelete={dynamicFields.length > 0 ? handleDeleteOne : undefined}
+        onBatchDelete={dynamicFields.length > 0 ? handleBatchDelete : undefined}
       />
 
       <Modal open={dialogOpen} onCancel={() => setDialogOpen(false)} footer={null} width={980} destroyOnClose>
@@ -586,6 +627,14 @@ export default function App() {
   const updateRecord = async (payload: Record<string, unknown>, moduleKey: string, id: string) => {
     const current = moduleMap.get(moduleKey) || modules[0];
     await api.update(current.endpoint, id, payload);
+    if (current.endpoint === "projects") await loadProjects();
+    await loadRows(moduleKey);
+    await loadDashboard();
+  };
+
+  const deleteRecord = async (moduleKey: string, id: string, projectId?: string) => {
+    const current = moduleMap.get(moduleKey) || modules[0];
+    await api.delete(current.endpoint, id, projectId);
     if (current.endpoint === "projects") await loadProjects();
     await loadRows(moduleKey);
     await loadDashboard();
@@ -859,6 +908,7 @@ export default function App() {
                   onModuleChange={setActiveModuleKey}
                   onCreate={createRecord}
                   onUpdate={updateRecord}
+                  onDelete={deleteRecord}
                 />
               }
             />
