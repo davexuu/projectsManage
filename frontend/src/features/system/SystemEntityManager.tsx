@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
-import { Button, Card, Modal, Select, Space, Table, message } from "antd";
+import { Button, Card, Modal, Select, Space, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import { AppTable } from "../../components/AppTable";
 import { DynamicForm } from "../../components/DynamicForm";
 import { FormField } from "../../types";
 import { SystemEntityMeta } from "../../api/client";
@@ -142,7 +143,7 @@ export function SystemEntityManager({
           </Space>
         }
       >
-        <Table
+        <AppTable
           rowKey={(row) => String(row.id)}
           columns={tableColumns}
           dataSource={rows}

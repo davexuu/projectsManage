@@ -1,0 +1,4 @@
+interface:
+  display_name: "每日日报 Agent"
+  short_description: "生成结构化项目/研发每日日报，支持汇总进展、风险、计划"
+  default_prompt: "使用 $daily-report-agent 生成今天的每日日报，按进展、风险、明日计划输出。"

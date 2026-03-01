@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { Card, Empty, Spin, Table, Typography, message } from "antd";
+import { Card, Empty, Spin, Typography, message } from "antd";
+import { AppTable } from "../../components/AppTable";
 import { api } from "../../api/client";
 import { getErrorMessage } from "../../utils/errors";
 
@@ -113,7 +114,7 @@ export function BurndownChart({ projectId, stage, startDate, endDate }: Props) {
               <ReactECharts option={option} style={{ height: 360 }} />
             </Suspense>
             <Typography.Title level={5}>数据明细</Typography.Title>
-            <Table
+            <AppTable
               rowKey="id"
               columns={[
                 { title: "统计周期", dataIndex: "statPeriod", key: "statPeriod", render: (v: unknown) => toDayText(String(v ?? "")) },

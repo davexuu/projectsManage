@@ -13,7 +13,18 @@ milestonesRouter.get(
   ah(async (req, res) => {
     const projectId = projectIdFromQuery(req);
     if (!(await ensureReadableOr403(req, res, projectId))) return;
-    res.json(await store.listMilestones(projectId, await allowedProjectIds(req)));
+    const stage = typeof req.query.stage === "string" ? req.query.stage : undefined;
+    const startDate = typeof req.query.startDate === "string" ? req.query.startDate : undefined;
+    const endDate = typeof req.query.endDate === "string" ? req.query.endDate : undefined;
+    const includeTaskSummary = req.query.includeTaskSummary === "true";
+    res.json(
+      await store.listMilestones(projectId, await allowedProjectIds(req), {
+        stage,
+        startDate,
+        endDate,
+        includeTaskSummary
+      })
+    );
   })
 );
 

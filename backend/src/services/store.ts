@@ -4,9 +4,15 @@ import {
   Milestone,
   ProgressRecord,
   Project,
+  ProjectAttachment,
+  ProjectReport,
   RiskItem,
   StatusAssessment,
+  Stage,
   TaskStatus,
+  WbsQuickIntent,
+  WbsSuggestionMode,
+  WbsQuickSuggestionResult,
   WbsTask
 } from "../domain/types.js";
 import { BusinessError } from "./errors.js";
@@ -14,7 +20,190 @@ import { RULE_CONFIG } from "./rules/config.js";
 
 export const prisma = new PrismaClient();
 
+interface ProjectAttachmentDelegate {
+  findMany(args: unknown): Promise<unknown[]>;
+  create(args: unknown): Promise<unknown>;
+  findFirst(args: unknown): Promise<unknown | null>;
+  delete(args: unknown): Promise<unknown>;
+}
+
+const projectAttachmentModel = (prisma as unknown as { projectAttachment: ProjectAttachmentDelegate }).projectAttachment;
+
 const toDate = (value: string) => new Date(value);
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item)).filter((item) => item.trim().length > 0);
+}
+
+function parseDateValue(value: string | Date): Date {
+  return value instanceof Date ? value : toDate(value);
+}
+
+const STAGE_CODE_MAP: Record<WbsTask["level1Stage"], number> = {
+  启动: 1,
+  规划: 2,
+  执行: 3,
+  验收: 4
+};
+
+const INTENT_KEYWORDS: Array<{ intent: WbsQuickIntent; keywords: string[]; reason: string }> = [
+  { intent: "新增", keywords: ["新增", "开发", "上线", "建设", "实现"], reason: "命中功能建设关键词" },
+  { intent: "修复", keywords: ["修复", "排查", "故障", "问题", "缺陷", "bug"], reason: "命中缺陷治理关键词" },
+  { intent: "优化", keywords: ["优化", "重构", "提效", "性能", "改造"], reason: "命中优化改造关键词" },
+  { intent: "合规", keywords: ["合规", "审计", "制度", "规范", "监管"], reason: "命中合规治理关键词" }
+];
+
+interface SuggestionTemplate {
+  stage: WbsTask["level1Stage"];
+  workPackage: string;
+  taskNameTemplate: string;
+  taskDetailTemplate: string;
+  deliverableTemplate: string;
+  isCritical?: WbsTask["isCritical"];
+}
+
+const SUGGESTION_TEMPLATES: Record<WbsQuickIntent, SuggestionTemplate[]> = {
+  新增: [
+    {
+      stage: "规划",
+      workPackage: "需求分析",
+      taskNameTemplate: "完成{{topic}}需求澄清与评审",
+      taskDetailTemplate: "明确{{topic}}范围、边界、验收标准并完成评审结论归档",
+      deliverableTemplate: "{{topic}}需求文档、评审纪要",
+      isCritical: "是"
+    },
+    {
+      stage: "规划",
+      workPackage: "方案设计",
+      taskNameTemplate: "完成{{topic}}技术方案设计",
+      taskDetailTemplate: "输出{{topic}}架构设计、接口定义与风险分析",
+      deliverableTemplate: "{{topic}}设计文档"
+    },
+    {
+      stage: "执行",
+      workPackage: "开发实现",
+      taskNameTemplate: "完成{{topic}}功能开发与单测",
+      taskDetailTemplate: "完成核心代码实现并通过关键路径单元测试",
+      deliverableTemplate: "代码提交记录、单测报告",
+      isCritical: "是"
+    },
+    {
+      stage: "执行",
+      workPackage: "联调测试",
+      taskNameTemplate: "完成{{topic}}联调与回归测试",
+      taskDetailTemplate: "覆盖主流程、异常流程和边界条件并关闭阻断缺陷",
+      deliverableTemplate: "联调记录、测试报告"
+    },
+    {
+      stage: "验收",
+      workPackage: "上线验收",
+      taskNameTemplate: "完成{{topic}}上线验证与交接",
+      taskDetailTemplate: "完成上线检查、效果验证和运维交接",
+      deliverableTemplate: "上线记录、验收确认单"
+    }
+  ],
+  修复: [
+    {
+      stage: "规划",
+      workPackage: "问题分析",
+      taskNameTemplate: "确认{{topic}}问题范围与影响面",
+      taskDetailTemplate: "定位问题根因并确认影响场景与优先级",
+      deliverableTemplate: "问题分析报告",
+      isCritical: "是"
+    },
+    {
+      stage: "执行",
+      workPackage: "缺陷修复",
+      taskNameTemplate: "完成{{topic}}修复开发",
+      taskDetailTemplate: "实现修复方案并完成代码审查",
+      deliverableTemplate: "修复提交记录"
+    },
+    {
+      stage: "执行",
+      workPackage: "回归验证",
+      taskNameTemplate: "完成{{topic}}回归验证",
+      taskDetailTemplate: "验证修复有效且未引入新问题",
+      deliverableTemplate: "回归测试报告"
+    },
+    {
+      stage: "验收",
+      workPackage: "复盘沉淀",
+      taskNameTemplate: "完成{{topic}}问题复盘",
+      taskDetailTemplate: "沉淀根因、改进项与预防措施",
+      deliverableTemplate: "复盘纪要"
+    }
+  ],
+  优化: [
+    {
+      stage: "规划",
+      workPackage: "现状评估",
+      taskNameTemplate: "完成{{topic}}现状评估",
+      taskDetailTemplate: "建立当前指标基线并识别优化机会",
+      deliverableTemplate: "评估报告"
+    },
+    {
+      stage: "规划",
+      workPackage: "优化设计",
+      taskNameTemplate: "完成{{topic}}优化方案评审",
+      taskDetailTemplate: "输出可实施优化方案并确认实施路径",
+      deliverableTemplate: "优化方案文档"
+    },
+    {
+      stage: "执行",
+      workPackage: "优化实施",
+      taskNameTemplate: "完成{{topic}}优化改造",
+      taskDetailTemplate: "按方案实施并保证业务连续性",
+      deliverableTemplate: "改造记录"
+    },
+    {
+      stage: "验收",
+      workPackage: "效果验证",
+      taskNameTemplate: "完成{{topic}}效果验证",
+      taskDetailTemplate: "对比优化前后指标并输出结论",
+      deliverableTemplate: "效果评估报告"
+    }
+  ],
+  合规: [
+    {
+      stage: "规划",
+      workPackage: "条款解读",
+      taskNameTemplate: "完成{{topic}}合规条款解读",
+      taskDetailTemplate: "梳理监管要求并映射到业务流程",
+      deliverableTemplate: "合规条款映射表",
+      isCritical: "是"
+    },
+    {
+      stage: "规划",
+      workPackage: "差距分析",
+      taskNameTemplate: "完成{{topic}}差距分析",
+      taskDetailTemplate: "识别当前状态与目标要求差距并制定整改计划",
+      deliverableTemplate: "差距分析报告"
+    },
+    {
+      stage: "执行",
+      workPackage: "整改实施",
+      taskNameTemplate: "完成{{topic}}整改实施",
+      taskDetailTemplate: "落实整改动作并留存过程证据",
+      deliverableTemplate: "整改记录、证据清单",
+      isCritical: "是"
+    },
+    {
+      stage: "验收",
+      workPackage: "审计确认",
+      taskNameTemplate: "完成{{topic}}合规验收",
+      taskDetailTemplate: "完成内部验收并输出审计确认结论",
+      deliverableTemplate: "验收报告、审计确认单"
+    }
+  ]
+};
+
+interface WbsPlanConflict {
+  rowIndex: number;
+  field: string;
+  message: string;
+  relatedTaskId?: string;
+}
 
 function normalizeProject(project: any): Project {
   return {
@@ -31,6 +220,35 @@ function normalizeProject(project: any): Project {
     expectedOutcome: project.expectedOutcome ?? undefined,
     createdAt: project.createdAt.toISOString(),
     updatedAt: project.updatedAt.toISOString()
+  };
+}
+
+function normalizeProjectReport(report: any): ProjectReport {
+  return {
+    id: report.id,
+    projectId: report.projectId,
+    reportType: report.reportType,
+    period: report.period,
+    status: report.status,
+    content: report.content,
+    sourceSnapshot: report.sourceSnapshot ?? undefined,
+    createdAt: report.createdAt.toISOString(),
+    updatedAt: report.updatedAt.toISOString()
+  };
+}
+
+function normalizeProjectAttachment(attachment: any): ProjectAttachment {
+  return {
+    id: attachment.id,
+    projectId: attachment.projectId,
+    category: attachment.category,
+    fileName: attachment.fileName,
+    objectKey: attachment.objectKey,
+    mimeType: attachment.mimeType ?? undefined,
+    fileSize: String(attachment.fileSize ?? "0"),
+    uploaderId: attachment.uploaderId ?? undefined,
+    createdAt: attachment.createdAt.toISOString(),
+    updatedAt: attachment.updatedAt.toISOString()
   };
 }
 
@@ -168,6 +386,252 @@ export class PrismaStore {
     if (milestoneHit + wbsHit === 0) {
       throw new BusinessError("风险关联里程碑/WBS不存在", 400);
     }
+  }
+
+  private async assertWbsParentValid(projectId: string, parentTaskId?: string, currentTaskId?: string) {
+    if (!parentTaskId) return;
+    if (currentTaskId && parentTaskId === currentTaskId) {
+      throw new BusinessError("父任务不能是当前任务自身", 400);
+    }
+    const parent = await prisma.wbsTask.findFirst({
+      where: { id: parentTaskId, projectId },
+      select: { id: true }
+    });
+    if (!parent) {
+      throw new BusinessError("父任务不存在或不属于当前项目", 400);
+    }
+  }
+
+  private async assertWbsMilestoneValid(projectId: string, milestoneId?: string) {
+    if (!milestoneId) return;
+    const milestone = await prisma.milestone.findFirst({
+      where: { id: milestoneId, projectId },
+      select: { id: true }
+    });
+    if (!milestone) {
+      throw new BusinessError("关联里程碑不存在或不属于当前项目", 400);
+    }
+  }
+
+  private async assertWbsPredecessorsExist(projectId: string, predecessorIds: string[], currentTaskId?: string) {
+    if (predecessorIds.length === 0) return;
+    if (currentTaskId && predecessorIds.includes(currentTaskId)) {
+      throw new BusinessError("任务不能依赖自身", 400);
+    }
+    const rows = await prisma.wbsTask.findMany({
+      where: { projectId, id: { in: predecessorIds } },
+      select: { id: true }
+    });
+    if (rows.length !== predecessorIds.length) {
+      throw new BusinessError("前置任务中存在无效任务ID", 400);
+    }
+  }
+
+  private async assertWbsDependencyNoCycle(projectId: string, currentTaskId: string, predecessorIds: string[]) {
+    const rows = await prisma.wbsTask.findMany({
+      where: { projectId },
+      select: { id: true, predecessorTaskIds: true }
+    });
+    const deps = new Map<string, string[]>();
+    rows.forEach((row) => deps.set(row.id, asStringArray(row.predecessorTaskIds)));
+    deps.set(currentTaskId, predecessorIds);
+
+    const visiting = new Set<string>();
+    const visited = new Set<string>();
+    const hasCycle = (id: string): boolean => {
+      if (visiting.has(id)) return true;
+      if (visited.has(id)) return false;
+      visiting.add(id);
+      const next = deps.get(id) || [];
+      for (const dep of next) {
+        if (!deps.has(dep)) continue;
+        if (hasCycle(dep)) return true;
+      }
+      visiting.delete(id);
+      visited.add(id);
+      return false;
+    };
+
+    if (hasCycle(currentTaskId)) {
+      throw new BusinessError("WBS任务依赖形成循环，请检查前置关系", 400);
+    }
+  }
+
+  private async assertWbsDependencyDateRule(projectId: string, input: Omit<WbsTask, "id" | "createdAt" | "updatedAt">) {
+    const predecessorIds = input.predecessorTaskIds ?? [];
+    if (predecessorIds.length === 0) return;
+    const taskStart = parseDateValue(input.plannedStartDate);
+    const predecessors = await prisma.wbsTask.findMany({
+      where: { projectId, id: { in: predecessorIds } },
+      select: { id: true, plannedEndDate: true, taskName: true }
+    });
+    for (const predecessor of predecessors) {
+      if (taskStart.getTime() < predecessor.plannedEndDate.getTime()) {
+        throw new BusinessError(
+          `任务计划开始时间早于前置任务完成时间：${predecessor.taskName}`,
+          400
+        );
+      }
+    }
+  }
+
+  private async assertWbsInput(projectId: string, input: Omit<WbsTask, "id" | "createdAt" | "updatedAt">, currentTaskId?: string) {
+    const start = parseDateValue(input.plannedStartDate);
+    const end = parseDateValue(input.plannedEndDate);
+    if (start.getTime() > end.getTime()) {
+      throw new BusinessError("计划完成时间不得早于计划开始时间", 400);
+    }
+    await this.assertWbsParentValid(projectId, input.parentTaskId, currentTaskId);
+    await this.assertWbsMilestoneValid(projectId, input.milestoneId);
+    await this.assertWbsPredecessorsExist(projectId, input.predecessorTaskIds ?? [], currentTaskId);
+    await this.assertWbsDependencyDateRule(projectId, input);
+  }
+
+  private resolveQuickIntent(prompt: string): { intent: WbsQuickIntent; reason: string } {
+    const normalized = prompt.trim().toLowerCase();
+    for (const item of INTENT_KEYWORDS) {
+      if (item.keywords.some((keyword) => normalized.includes(keyword.toLowerCase()))) {
+        return { intent: item.intent, reason: item.reason };
+      }
+    }
+    return { intent: "新增", reason: "未命中关键词，使用默认新增模板" };
+  }
+
+  private formatTemplateText(template: string, topic: string) {
+    return template.replace(/\{\{topic\}\}/g, topic);
+  }
+
+  private buildQuickSuggestionRows(
+    intent: WbsQuickIntent,
+    prompt: string,
+    projectOwner: string | undefined,
+    mode: WbsSuggestionMode,
+    targetStage: Stage
+  ): Array<Omit<WbsTask, "id" | "createdAt" | "updatedAt">> {
+    const owner = (projectOwner || "").trim() || "待分配";
+    const today = new Date();
+    const templates = this.pickSuggestionTemplates(intent, mode, targetStage);
+    return templates.map((template, index) => {
+      const start = new Date(today);
+      start.setDate(today.getDate() + index * 3);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 2);
+      const format = (date: Date) => date.toISOString().slice(0, 10);
+      return {
+        projectId: "",
+        level1Stage: template.stage,
+        level2WorkPackage: template.workPackage,
+        taskName: this.formatTemplateText(template.taskNameTemplate, prompt),
+        taskDetail: this.formatTemplateText(template.taskDetailTemplate, prompt),
+        deliverable: this.formatTemplateText(template.deliverableTemplate, prompt),
+        taskOwner: owner,
+        plannedStartDate: format(start),
+        plannedEndDate: format(end),
+        currentStatus: "未开始",
+        isCritical: template.isCritical ?? "否",
+        predecessorTaskIds: []
+      };
+    });
+  }
+
+  private pickSuggestionTemplates(
+    intent: WbsQuickIntent,
+    mode: WbsSuggestionMode,
+    targetStage: Stage
+  ): SuggestionTemplate[] {
+    const templates = SUGGESTION_TEMPLATES[intent] ?? SUGGESTION_TEMPLATES.新增;
+    if (mode === "complete") return templates;
+    const stageTemplates = templates.filter((item) => item.stage === targetStage);
+    const fallbackTemplates = templates.filter((item) => item.stage !== targetStage);
+    if (mode === "light") {
+      return [...stageTemplates, ...fallbackTemplates].slice(0, 2);
+    }
+    const standard = [...stageTemplates, ...fallbackTemplates].slice(0, 4);
+    return standard.length >= 2 ? standard : [...templates].slice(0, 2);
+  }
+
+  private buildSuggestionReason(
+    mode: WbsSuggestionMode,
+    targetStage: Stage,
+    intentReason: string,
+    items: Array<Omit<WbsTask, "id" | "createdAt" | "updatedAt">>
+  ) {
+    const modeText =
+      mode === "light" ? "轻量档（优先生成 1-2 条）" : mode === "complete" ? "完整档（可跨阶段展开）" : "标准档（按当前阶段生成）";
+    const stageCount = items.filter((item) => item.level1Stage === targetStage).length;
+    const fallbackUsed = stageCount < items.length && mode !== "complete";
+    const fallbackText = fallbackUsed ? "；当前阶段模板不足，已补充邻近阶段建议" : "";
+    return `${modeText}，目标阶段：${targetStage}；${intentReason}${fallbackText}`;
+  }
+
+  private buildSortOrderByCode(code?: string, fallback?: number) {
+    if (!code) return fallback;
+    const parts = code
+      .split(".")
+      .map((part) => Number(part))
+      .filter((part) => Number.isFinite(part) && part >= 0);
+    if (parts.length === 0) return fallback;
+    const weights = [1_000_000, 1_000, 1];
+    let sort = 0;
+    for (let index = 0; index < Math.min(parts.length, 3); index += 1) {
+      sort += (parts[index] || 0) * weights[index]!;
+    }
+    return sort || fallback;
+  }
+
+  private async assignAutoWbsCodes(
+    projectId: string,
+    items: Array<Omit<WbsTask, "id" | "createdAt" | "updatedAt">>
+  ): Promise<Array<Omit<WbsTask, "id" | "createdAt" | "updatedAt">>> {
+    const existing = await prisma.wbsTask.findMany({
+      where: { projectId },
+      select: { wbsCode: true, level1Stage: true, level2WorkPackage: true }
+    });
+
+    const packageOrderByStage = new Map<string, string[]>();
+    const taskCountByBucket = new Map<string, number>();
+
+    const ensurePackage = (stage: WbsTask["level1Stage"], workPackage: string) => {
+      const stageKey = stage;
+      const normalized = workPackage.trim() || "默认工作包";
+      const list = packageOrderByStage.get(stageKey) || [];
+      if (!list.includes(normalized)) {
+        list.push(normalized);
+        packageOrderByStage.set(stageKey, list);
+      }
+      return { list, normalized };
+    };
+
+    existing.forEach((row) => {
+      const stage = row.level1Stage as WbsTask["level1Stage"];
+      const workPackage = String(row.level2WorkPackage || "").trim() || "默认工作包";
+      const { list, normalized } = ensurePackage(stage, workPackage);
+      const packageIndex = list.indexOf(normalized) + 1;
+      const bucketKey = `${stage}|${packageIndex}`;
+      taskCountByBucket.set(bucketKey, (taskCountByBucket.get(bucketKey) || 0) + 1);
+    });
+
+    return items.map((item) => {
+      const current = (item.wbsCode || "").trim();
+      if (current) {
+        return {
+          ...item,
+          wbsCode: current,
+          sortOrder: item.sortOrder ?? this.buildSortOrderByCode(current, item.sortOrder)
+        };
+      }
+      const { list, normalized } = ensurePackage(item.level1Stage, item.level2WorkPackage);
+      const packageIndex = list.indexOf(normalized) + 1;
+      const bucketKey = `${item.level1Stage}|${packageIndex}`;
+      const nextTaskIndex = (taskCountByBucket.get(bucketKey) || 0) + 1;
+      taskCountByBucket.set(bucketKey, nextTaskIndex);
+      const generatedCode = `${STAGE_CODE_MAP[item.level1Stage]}.${packageIndex}.${nextTaskIndex}`;
+      return {
+        ...item,
+        wbsCode: generatedCode,
+        sortOrder: item.sortOrder ?? this.buildSortOrderByCode(generatedCode, item.sortOrder)
+      };
+    });
   }
 
   private assertChangeCreateRule(input: Omit<ChangeRequest, "id" | "createdAt" | "updatedAt">) {
@@ -536,33 +1000,239 @@ export class PrismaStore {
     return normalizeProject(row);
   }
 
-  async listWbs(projectId?: string, allowedProjectIds?: string[]): Promise<WbsTask[]> {
-    return prisma.wbsTask.findMany({
-      where: whereProjectFilter(projectId, allowedProjectIds),
+  async listProjectAttachments(projectId: string): Promise<ProjectAttachment[]> {
+    const rows = await projectAttachmentModel.findMany({
+      where: { projectId },
       orderBy: { createdAt: "desc" }
+    });
+    return rows.map((row) => normalizeProjectAttachment(row));
+  }
+
+  async createProjectAttachment(input: {
+    projectId: string;
+    category: string;
+    fileName: string;
+    objectKey: string;
+    mimeType?: string;
+    fileSize: bigint;
+    uploaderId?: string;
+  }): Promise<ProjectAttachment> {
+    const row = await projectAttachmentModel.create({
+      data: {
+        projectId: input.projectId,
+        category: input.category,
+        fileName: input.fileName,
+        objectKey: input.objectKey,
+        mimeType: input.mimeType,
+        fileSize: input.fileSize,
+        uploaderId: input.uploaderId
+      }
+    });
+    return normalizeProjectAttachment(row);
+  }
+
+  async getProjectAttachment(projectId: string, attachmentId: string): Promise<ProjectAttachment | null> {
+    const row = await projectAttachmentModel.findFirst({
+      where: { id: attachmentId, projectId }
+    });
+    return row ? normalizeProjectAttachment(row) : null;
+  }
+
+  async deleteProjectAttachment(projectId: string, attachmentId: string): Promise<ProjectAttachment | null> {
+    const row = await projectAttachmentModel.findFirst({
+      where: { id: attachmentId, projectId }
+    });
+    if (!row) return null;
+    await projectAttachmentModel.delete({ where: { id: attachmentId } });
+    return normalizeProjectAttachment(row);
+  }
+
+  async generateQuickWbsSuggestions(input: {
+    projectId: string;
+    prompt: string;
+    mode?: WbsSuggestionMode;
+    targetStage?: Stage;
+  }): Promise<WbsQuickSuggestionResult> {
+    const project = await prisma.project.findUnique({
+      where: { id: input.projectId },
+      select: { id: true, projectOwner: true }
+    });
+    if (!project) {
+      throw new BusinessError("项目不存在", 404);
+    }
+    const normalizedPrompt = input.prompt.trim();
+    const mode = input.mode ?? "standard";
+    const targetStage = input.targetStage ?? "规划";
+    const { intent, reason } = this.resolveQuickIntent(normalizedPrompt);
+    const rows = this.buildQuickSuggestionRows(intent, normalizedPrompt, project.projectOwner, mode, targetStage).map((item) => ({
+      ...item,
+      projectId: input.projectId
+    }));
+    const withCodes = await this.assignAutoWbsCodes(input.projectId, rows);
+    return {
+      intent,
+      mode,
+      targetStage,
+      normalizedPrompt,
+      reason: this.buildSuggestionReason(mode, targetStage, reason, withCodes),
+      items: withCodes
+    };
+  }
+
+  async listWbs(
+    projectId?: string,
+    allowedProjectIds?: string[],
+    filters?: { stage?: string; startDate?: string; endDate?: string }
+  ): Promise<WbsTask[]> {
+    const dateFilter = filters?.startDate || filters?.endDate
+      ? {
+          plannedEndDate: filters?.startDate ? { gte: toDate(filters.startDate) } : undefined,
+          plannedStartDate: filters?.endDate ? { lte: toDate(filters.endDate) } : undefined
+        }
+      : {};
+    return prisma.wbsTask.findMany({
+      where: {
+        ...(whereProjectFilter(projectId, allowedProjectIds) || {}),
+        ...(filters?.stage ? { level1Stage: filters.stage as any } : {}),
+        ...dateFilter
+      },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }]
     }) as unknown as Promise<WbsTask[]>;
   }
 
   async createWbs(input: Omit<WbsTask, "id" | "createdAt" | "updatedAt">): Promise<WbsTask> {
     await this.assertNoPendingStructuralChange(input.projectId);
+    const [normalized] = await this.assignAutoWbsCodes(input.projectId, [input]);
+    if (!normalized) {
+      throw new BusinessError("WBS输入无效", 400);
+    }
+    await this.assertWbsInput(input.projectId, normalized);
     return prisma.wbsTask.create({
       data: {
-        ...input,
-        plannedStartDate: toDate(input.plannedStartDate),
-        plannedEndDate: toDate(input.plannedEndDate)
+        ...normalized,
+        predecessorTaskIds: normalized.predecessorTaskIds ?? [],
+        plannedStartDate: toDate(normalized.plannedStartDate),
+        plannedEndDate: toDate(normalized.plannedEndDate)
       }
     }) as unknown as Promise<WbsTask>;
   }
 
   async updateWbs(id: string, input: Omit<WbsTask, "id" | "createdAt" | "updatedAt">): Promise<WbsTask> {
     await this.assertNoPendingStructuralChange(input.projectId);
+    await this.assertWbsInput(input.projectId, input, id);
+    await this.assertWbsDependencyNoCycle(input.projectId, id, input.predecessorTaskIds ?? []);
     return prisma.wbsTask.update({
       where: { id },
       data: {
         ...input,
+        predecessorTaskIds: input.predecessorTaskIds ?? [],
         plannedStartDate: toDate(input.plannedStartDate),
         plannedEndDate: toDate(input.plannedEndDate)
       }
+    }) as unknown as Promise<WbsTask>;
+  }
+
+  async batchCreateWbs(input: {
+    projectId: string;
+    items: Array<Omit<WbsTask, "id" | "createdAt" | "updatedAt">>;
+  }): Promise<{ createdCount: number; items: WbsTask[] }> {
+    await this.assertNoPendingStructuralChange(input.projectId);
+    const normalizedItems = await this.assignAutoWbsCodes(input.projectId, input.items);
+    const errors: Array<{ rowIndex: number; message: string }> = [];
+    for (let index = 0; index < normalizedItems.length; index += 1) {
+      const item = normalizedItems[index]!;
+      try {
+        await this.assertWbsInput(input.projectId, item);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "校验失败";
+        errors.push({ rowIndex: index, message });
+      }
+    }
+    if (errors.length > 0) {
+      throw new BusinessError("批量创建失败，存在未通过校验的记录", 400, {
+        rowErrors: errors
+      });
+    }
+
+    const created = await prisma.$transaction(
+      normalizedItems.map((item) =>
+        prisma.wbsTask.create({
+          data: {
+            ...item,
+            predecessorTaskIds: item.predecessorTaskIds ?? [],
+            plannedStartDate: toDate(item.plannedStartDate),
+            plannedEndDate: toDate(item.plannedEndDate)
+          }
+        })
+      )
+    );
+
+    return {
+      createdCount: created.length,
+      items: created as unknown as WbsTask[]
+    };
+  }
+
+  async validateWbsPlan(input: {
+    projectId: string;
+    items: Array<Omit<WbsTask, "id" | "createdAt" | "updatedAt">>;
+  }): Promise<{ ok: boolean; conflicts: WbsPlanConflict[] }> {
+    const conflicts: WbsPlanConflict[] = [];
+    for (let index = 0; index < input.items.length; index += 1) {
+      const item = input.items[index]!;
+      const start = parseDateValue(item.plannedStartDate);
+      const end = parseDateValue(item.plannedEndDate);
+      if (start.getTime() > end.getTime()) {
+        conflicts.push({
+          rowIndex: index,
+          field: "plannedEndDate",
+          message: "计划完成时间不得早于计划开始时间"
+        });
+      }
+      const predecessorIds = item.predecessorTaskIds ?? [];
+      if (predecessorIds.length > 0) {
+        const predecessors = await prisma.wbsTask.findMany({
+          where: { projectId: input.projectId, id: { in: predecessorIds } },
+          select: { id: true, plannedEndDate: true }
+        });
+        const predecessorMap = new Map(predecessors.map((row) => [row.id, row]));
+        predecessorIds.forEach((predecessorId) => {
+          const predecessor = predecessorMap.get(predecessorId);
+          if (!predecessor) {
+            conflicts.push({
+              rowIndex: index,
+              field: "predecessorTaskIds",
+              relatedTaskId: predecessorId,
+              message: "前置任务不存在"
+            });
+            return;
+          }
+          if (start.getTime() < predecessor.plannedEndDate.getTime()) {
+            conflicts.push({
+              rowIndex: index,
+              field: "plannedStartDate",
+              relatedTaskId: predecessorId,
+              message: "计划开始时间早于前置任务完成时间"
+            });
+          }
+        });
+      }
+    }
+    return { ok: conflicts.length === 0, conflicts };
+  }
+
+  async updateWbsStatus(id: string, projectId: string, currentStatus: TaskStatus): Promise<WbsTask> {
+    await this.assertNoPendingStructuralChange(projectId);
+    const exists = await prisma.wbsTask.findFirst({
+      where: { id, projectId },
+      select: { id: true }
+    });
+    if (!exists) {
+      throw new BusinessError("WBS任务不存在", 404);
+    }
+    return prisma.wbsTask.update({
+      where: { id },
+      data: { currentStatus }
     }) as unknown as Promise<WbsTask>;
   }
 
@@ -570,11 +1240,57 @@ export class PrismaStore {
     return prisma.wbsTask.delete({ where: { id } }) as unknown as Promise<WbsTask>;
   }
 
-  async listMilestones(projectId?: string, allowedProjectIds?: string[]): Promise<Milestone[]> {
-    return prisma.milestone.findMany({
-      where: whereProjectFilter(projectId, allowedProjectIds),
-      orderBy: { createdAt: "desc" }
-    }) as unknown as Promise<Milestone[]>;
+  async listMilestones(
+    projectId?: string,
+    allowedProjectIds?: string[],
+    filters?: { stage?: string; startDate?: string; endDate?: string; includeTaskSummary?: boolean }
+  ): Promise<Milestone[]> {
+    const plannedFinishDateFilter =
+      filters?.startDate || filters?.endDate
+        ? {
+            gte: filters?.startDate ? toDate(filters.startDate) : undefined,
+            lte: filters?.endDate ? toDate(filters.endDate) : undefined
+          }
+        : undefined;
+    const rows = await prisma.milestone.findMany({
+      where: {
+        ...(whereProjectFilter(projectId, allowedProjectIds) || {}),
+        ...(filters?.stage ? { level1Stage: filters.stage as any } : {}),
+        ...(plannedFinishDateFilter ? { plannedFinishDate: plannedFinishDateFilter } : {})
+      },
+      include: filters?.includeTaskSummary
+        ? {
+            linkedTasks: {
+              select: {
+                id: true,
+                taskName: true,
+                wbsCode: true,
+                currentStatus: true
+              }
+            }
+          }
+        : undefined,
+      orderBy: [{ plannedFinishDate: "asc" }, { createdAt: "desc" }]
+    });
+
+    return rows.map((row) => ({
+      ...(row as unknown as Milestone),
+      linkedTaskSummaries:
+        "linkedTasks" in row
+          ? ((row as unknown as { linkedTasks: Array<{ id: string; taskName: string; wbsCode: string | null; currentStatus: TaskStatus }> }).linkedTasks || []).map((task) => ({
+            id: task.id,
+            taskName: task.taskName,
+            wbsCode: task.wbsCode ?? undefined,
+            currentStatus: task.currentStatus
+          }))
+          : undefined,
+      linkWarning:
+        "linkedTasks" in row &&
+        ["进行中", "已完成"].includes(String((row as unknown as { currentStatus: string }).currentStatus)) &&
+        ((row as unknown as { linkedTasks?: unknown[] }).linkedTasks || []).length === 0
+          ? "里程碑缺少支撑任务关联"
+          : undefined
+    }));
   }
 
   async createMilestone(input: Omit<Milestone, "id" | "createdAt" | "updatedAt">): Promise<Milestone> {
@@ -837,6 +1553,145 @@ export class PrismaStore {
       riskHotspots: [...hotspotMap.entries()].map(([stage, count]) => ({ stage, count })),
       progressTrend: progressRecords.map((p) => ({ period: p.statPeriod, progress: p.overallProgressPct }))
     };
+  }
+
+  async listProjectReports(
+    projectId?: string,
+    allowedProjectIds?: string[],
+    reportType?: "WEEKLY" | "MONTHLY"
+  ): Promise<ProjectReport[]> {
+    const where = {
+      ...whereProjectFilter(projectId, allowedProjectIds),
+      ...(reportType ? { reportType } : {})
+    };
+    const rows = await prisma.projectReport.findMany({
+      where,
+      orderBy: [{ period: "desc" }, { updatedAt: "desc" }]
+    });
+    return rows.map(normalizeProjectReport);
+  }
+
+  async getProjectReportSummary(projectId: string) {
+    const [weekly, monthly] = await Promise.all([
+      prisma.projectReport.findFirst({
+        where: { projectId, reportType: "WEEKLY" },
+        orderBy: { period: "desc" }
+      }),
+      prisma.projectReport.findFirst({
+        where: { projectId, reportType: "MONTHLY" },
+        orderBy: { period: "desc" }
+      })
+    ]);
+    return {
+      weekly: weekly ? normalizeProjectReport(weekly) : null,
+      monthly: monthly ? normalizeProjectReport(monthly) : null
+    };
+  }
+
+  async upsertProjectReport(input: {
+    projectId: string;
+    reportType: "WEEKLY" | "MONTHLY";
+    period: string;
+    status: "DRAFT" | "SUBMITTED";
+    content: string;
+    sourceSnapshot?: unknown;
+  }): Promise<ProjectReport> {
+    const row = await prisma.projectReport.upsert({
+      where: {
+        projectId_reportType_period: {
+          projectId: input.projectId,
+          reportType: input.reportType,
+          period: input.period
+        }
+      },
+      create: {
+        projectId: input.projectId,
+        reportType: input.reportType,
+        period: input.period,
+        status: input.status,
+        content: input.content,
+        sourceSnapshot: input.sourceSnapshot as any
+      },
+      update: {
+        status: input.status,
+        content: input.content,
+        sourceSnapshot: input.sourceSnapshot as any
+      }
+    });
+    return normalizeProjectReport(row);
+  }
+
+  async generateProjectReportDraft(
+    projectId: string,
+    reportType: "WEEKLY" | "MONTHLY",
+    period: string
+  ): Promise<ProjectReport> {
+    const dashboard = await this.getProjectDashboard(projectId);
+    if (!dashboard) throw new BusinessError("项目不存在", 404);
+    const [latestProgress, latestAssessment, topRisks, openChanges] = await Promise.all([
+      prisma.progressRecord.findMany({ where: { projectId }, orderBy: { statPeriod: "desc" }, take: 3 }),
+      prisma.statusAssessment.findMany({ where: { projectId }, orderBy: { assessmentDate: "desc" }, take: 1 }),
+      prisma.riskItem.findMany({ where: { projectId, currentStatus: { not: "已完成" } }, orderBy: { updatedAt: "desc" }, take: 5 }),
+      prisma.changeRequest.findMany({ where: { projectId, currentStatus: { not: "已完成" } }, orderBy: { updatedAt: "desc" }, take: 5 })
+    ]);
+    const snapshot = {
+      kpis: dashboard.kpis,
+      latestStatus: dashboard.latestStatus,
+      progressRecords: latestProgress.map((item) => ({
+        statPeriod: item.statPeriod,
+        currentStage: item.currentStage,
+        overallProgressPct: item.overallProgressPct,
+        nextPlan: item.nextPlan
+      })),
+      statusAssessments: latestAssessment.map((item) => ({
+        assessmentDate: item.assessmentDate,
+        overallStatus: item.overallStatus,
+        assessmentBasis: item.assessmentBasis,
+        watchItems: item.watchItems
+      })),
+      risks: topRisks.map((item) => ({
+        riskCode: item.riskCode,
+        description: item.description,
+        owner: item.owner,
+        currentStatus: item.currentStatus
+      })),
+      changes: openChanges.map((item) => ({
+        changeCode: item.changeCode,
+        changeType: item.changeType,
+        currentStatus: item.currentStatus
+      }))
+    };
+    const kpiMap = dashboard.kpis as Record<string, unknown>;
+    const content = [
+      `# ${reportType === "WEEKLY" ? "周报" : "月报"}草稿`,
+      ``,
+      `- 周期：${period}`,
+      `- 任务完成率：${Number(kpiMap.taskCompletionRate ?? 0)}%`,
+      `- 里程碑完成率：${Number(kpiMap.milestoneCompletionRate ?? 0)}%`,
+      `- 逾期任务：${Number(kpiMap.taskOverdue ?? 0)}`,
+      `- 开放风险：${Number(kpiMap.openRiskCount ?? 0)}`,
+      ``,
+      `## 本期重点进展`,
+      latestProgress.map((item) => `- ${item.statPeriod.toISOString().slice(0, 10)}：进度 ${item.overallProgressPct}%`).join("\n") || "- 暂无推进记录",
+      ``,
+      `## 风险与待协调事项`,
+      topRisks.map((item) => `- [${item.riskCode}] ${item.description}（责任人：${item.owner}）`).join("\n") || "- 暂无开放风险",
+      ``,
+      `## 变更情况`,
+      openChanges.map((item) => `- [${item.changeCode}] ${item.changeType}（状态：${item.currentStatus}）`).join("\n") || "- 暂无进行中变更",
+      ``,
+      `## 下阶段计划`,
+      latestProgress.map((item) => `- ${item.nextPlan}`).join("\n") || "- 请补充下阶段计划"
+    ].join("\n");
+
+    return this.upsertProjectReport({
+      projectId,
+      reportType,
+      period,
+      status: "DRAFT",
+      content,
+      sourceSnapshot: snapshot
+    });
   }
 
   get client() {

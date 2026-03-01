@@ -63,6 +63,16 @@ enum DataScope {
   CUSTOM
 }
 
+enum ReportType {
+  WEEKLY
+  MONTHLY
+}
+
+enum ReportStatus {
+  DRAFT
+  SUBMITTED
+}
+
 model User {
   id           String   @id @default(uuid())
   username     String   @unique
@@ -446,6 +456,25 @@ model Project {
   risks             RiskItem[]
   changes           ChangeRequest[]
   members           ProjectMember[]
+  reports           ProjectReport[]
+  attachments       ProjectAttachment[]
+}
+
+model ProjectAttachment {
+  id          String   @id @default(uuid())
+  projectId   String
+  category    String
+  fileName    String
+  objectKey   String   @unique
+  mimeType    String?
+  fileSize    BigInt
+  uploaderId  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, category])
 }
 
 model ProjectMember {
@@ -465,6 +494,11 @@ model ProjectMember {
 model WbsTask {
   id                String     @id @default(uuid())
   projectId         String
+  wbsCode           String?
+  parentTaskId      String?
+  predecessorTaskIds Json?
+  milestoneId       String?
+  sortOrder         Int?
   level1Stage       Stage
   level2WorkPackage String
   taskName          String
@@ -480,9 +514,15 @@ model WbsTask {
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project          Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parentTask       WbsTask?  @relation("WbsTaskTree", fields: [parentTaskId], references: [id], onDelete: SetNull)
+  children         WbsTask[] @relation("WbsTaskTree")
+  linkedMilestone  Milestone? @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
 
   @@index([projectId])
+  @@index([projectId, parentTaskId])
+  @@index([projectId, wbsCode])
+  @@index([milestoneId])
 }
 
 model Milestone {
@@ -502,9 +542,11 @@ model Milestone {
   createdAt          DateTime   @default(now())
   updatedAt          DateTime   @updatedAt
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project      Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  linkedTasks  WbsTask[]
 
   @@index([projectId])
+  @@index([projectId, milestoneCode])
 }
 
 model ProgressRecord {
@@ -596,4 +638,21 @@ model ChangeRequest {
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
+}
+
+model ProjectReport {
+  id             String       @id @default(uuid())
+  projectId      String
+  reportType     ReportType
+  period         String
+  status         ReportStatus @default(DRAFT)
+  content        String
+  sourceSnapshot Json?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, reportType])
+  @@unique([projectId, reportType, period])
 }

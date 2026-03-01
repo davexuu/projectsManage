@@ -139,6 +139,126 @@ async function main() {
       })
     });
     assertStatus(createWbsResp.status, 201, "创建WBS", createWbsResp.body);
+    const firstWbsId = createWbsResp.body?.id;
+    if (!firstWbsId) throw new Error("创建WBS未返回id");
+    if (!/^\d+(?:\.\d+)*$/.test(String(createWbsResp.body?.wbsCode ?? ""))) {
+      throw new Error("创建WBS未自动生成合法编码");
+    }
+
+    const suggestionResp = await request("/wbs/quick-suggestions", {
+      method: "POST",
+      headers: authHeader(adminToken),
+      body: JSON.stringify({
+        projectId,
+        prompt: "新增支付功能"
+      })
+    });
+    assertStatus(suggestionResp.status, 200, "规则拆解建议接口", suggestionResp.body);
+    if (!Array.isArray(suggestionResp.body?.items) || suggestionResp.body.items.length === 0) {
+      throw new Error("规则拆解建议未返回任务列表");
+    }
+
+    const validatePlanResp = await request("/wbs/validate-plan", {
+      method: "POST",
+      headers: authHeader(adminToken),
+      body: JSON.stringify({
+        projectId,
+        items: [
+          {
+            projectId,
+            wbsCode: "1.2",
+            level1Stage: "规划",
+            level2WorkPackage: "集成联调",
+            taskName: "接口联调任务",
+            taskDetail: "按规范完成联调",
+            deliverable: "联调记录",
+            taskOwner: "系统管理员",
+            plannedStartDate: "2026-02-05",
+            plannedEndDate: "2026-02-11",
+            currentStatus: "未开始",
+            isCritical: "否",
+            predecessorTaskIds: [firstWbsId]
+          }
+        ]
+      })
+    });
+    assertStatus(validatePlanResp.status, 200, "计划校验接口可用", validatePlanResp.body);
+    if (validatePlanResp.body?.ok !== false) {
+      throw new Error("计划校验应识别依赖时间冲突");
+    }
+
+    const batchBadResp = await request("/wbs/batch", {
+      method: "POST",
+      headers: authHeader(adminToken),
+      body: JSON.stringify({
+        projectId,
+        items: [
+          {
+            projectId,
+            wbsCode: "1.3",
+            level1Stage: "规划",
+            level2WorkPackage: "集成联调",
+            taskName: "批量任务-非法日期",
+            taskDetail: "测试批量校验",
+            deliverable: "记录",
+            taskOwner: "系统管理员",
+            plannedStartDate: "2026-03-10",
+            plannedEndDate: "2026-03-01",
+            currentStatus: "未开始",
+            isCritical: "否"
+          }
+        ]
+      })
+    });
+    assertStatus(batchBadResp.status, 400, "批量创建行级校验", batchBadResp.body);
+    if (!Array.isArray(batchBadResp.body?.details?.rowErrors)) {
+      throw new Error("批量创建错误未返回 rowErrors 明细");
+    }
+
+    const batchCreateResp = await request("/wbs/batch", {
+      method: "POST",
+      headers: authHeader(adminToken),
+      body: JSON.stringify({
+        projectId,
+        items: [
+          {
+            projectId,
+            level1Stage: "规划",
+            level2WorkPackage: "集成联调",
+            taskName: "批量任务-01",
+            taskDetail: "测试批量提交",
+            deliverable: "记录",
+            taskOwner: "系统管理员",
+            plannedStartDate: "2026-03-01",
+            plannedEndDate: "2026-03-05",
+            currentStatus: "未开始",
+            isCritical: "否",
+            predecessorTaskIds: [firstWbsId]
+          },
+          {
+            projectId,
+            level1Stage: "规划",
+            level2WorkPackage: "集成联调",
+            taskName: "批量任务-02",
+            taskDetail: "测试批量提交",
+            deliverable: "记录",
+            taskOwner: "系统管理员",
+            plannedStartDate: "2026-03-06",
+            plannedEndDate: "2026-03-12",
+            currentStatus: "未开始",
+            isCritical: "否"
+          }
+        ]
+      })
+    });
+    assertStatus(batchCreateResp.status, 201, "批量创建WBS", batchCreateResp.body);
+    if (Number(batchCreateResp.body?.createdCount) !== 2) {
+      throw new Error("批量创建返回数量不符合预期");
+    }
+    const autoCodes = (batchCreateResp.body?.items || []).map((item) => String(item.wbsCode || ""));
+    if (autoCodes.some((code) => !/^\d+(?:\.\d+)*$/.test(code))) {
+      throw new Error("批量创建未自动生成合法WBS编码");
+    }
 
     const badMilestoneCodeResp = await request("/milestones", {
       method: "POST",
@@ -175,6 +295,40 @@ async function main() {
       })
     });
     assertStatus(createMilestoneResp.status, 201, "创建里程碑", createMilestoneResp.body);
+    const milestoneId = createMilestoneResp.body?.id;
+    if (!milestoneId) throw new Error("创建里程碑未返回id");
+
+    const linkWbsResp = await request(`/wbs/${firstWbsId}`, {
+      method: "PUT",
+      headers: authHeader(adminToken),
+      body: JSON.stringify({
+        projectId,
+        wbsCode: "1.1",
+        milestoneId,
+        level1Stage: "规划",
+        level2WorkPackage: "功能梳理与整合",
+        taskName: "梳理功能模块",
+        taskDetail: "梳理现有功能和入口",
+        deliverable: "功能清单",
+        taskOwner: "系统管理员",
+        plannedStartDate: "2026-02-01",
+        plannedEndDate: "2026-02-10",
+        currentStatus: "进行中",
+        isCritical: "是",
+        riskHint: "跨部门协同",
+        linkedMasterTask: "总表-001"
+      })
+    });
+    assertStatus(linkWbsResp.status, 200, "关联任务到里程碑", linkWbsResp.body);
+
+    const milestoneSummaryResp = await request(`/milestones?projectId=${projectId}&includeTaskSummary=true`, {
+      headers: authHeader(adminToken)
+    });
+    assertStatus(milestoneSummaryResp.status, 200, "里程碑关联摘要查询", milestoneSummaryResp.body);
+    const linkedMilestone = (milestoneSummaryResp.body || []).find((item) => item.id === milestoneId);
+    if (!linkedMilestone || !Array.isArray(linkedMilestone.linkedTaskSummaries)) {
+      throw new Error("里程碑摘要未返回 linkedTaskSummaries");
+    }
 
     const progressMissingMilestoneResp = await request("/progress-records", {
       method: "POST",

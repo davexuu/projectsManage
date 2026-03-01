@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { Button, Card, Col, Input, message, Row, Select, Table } from "antd";
+import { Button, Card, Col, Input, message, Row, Select } from "antd";
+import { AppTable } from "../../components/AppTable";
 
 export interface DictionaryItem {
   key: string;
@@ -60,7 +61,7 @@ export function DictionaryManager({ visible, items, onAddOption, onRemoveOption 
         </Col>
       </Row>
 
-      <Table
+      <AppTable
         style={{ marginTop: 16 }}
         rowKey={(row) => String(row.option)}
         columns={[
@@ -84,4 +85,3 @@ export function DictionaryManager({ visible, items, onAddOption, onRemoveOption 
     </Card>
   );
 }
-

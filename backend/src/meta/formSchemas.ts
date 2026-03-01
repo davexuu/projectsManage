@@ -19,19 +19,188 @@ export const formSchemas: Record<string, FormField[]> = {
     { key: "expectedOutcome", label: "预期成果", type: "textarea", required: false }
   ],
   wbs: [
-    { key: "projectId", label: "项目ID", type: "text", required: true },
-    { key: "level1Stage", label: "一级阶段", type: "select", required: true, options: stageOptions },
-    { key: "level2WorkPackage", label: "二级工作包", type: "text", required: true },
-    { key: "taskName", label: "任务名称", type: "text", required: true, hint: "建议动词 + 对象，可判断完成与否" },
-    { key: "taskDetail", label: "具体任务", type: "textarea", required: true },
-    { key: "deliverable", label: "交付物", type: "text", required: true },
-    { key: "taskOwner", label: "任务责任人", type: "text", required: true },
-    { key: "plannedStartDate", label: "计划开始时间", type: "date", required: true },
-    { key: "plannedEndDate", label: "计划完成时间", type: "date", required: true },
-    { key: "currentStatus", label: "当前状态", type: "select", required: true, options: taskStatusOptions },
-    { key: "isCritical", label: "是否关键任务", type: "select", required: true, options: ynOptions },
-    { key: "riskHint", label: "风险点说明", type: "textarea", required: false },
-    { key: "linkedMasterTask", label: "关联总表任务", type: "text", required: false }
+    {
+      key: "projectId",
+      label: "项目ID",
+      type: "text",
+      required: true,
+      priority: "auto",
+      section: "context",
+      helpText: "优先从当前项目上下文自动带入，无需手动填写",
+      defaultValueResolver: "selectedProjectId"
+    },
+    {
+      key: "wbsCode",
+      label: "WBS编码",
+      type: "text",
+      required: false,
+      priority: "auto",
+      section: "detail",
+      placeholder: "系统自动生成",
+      helpText: "系统按阶段/工作包自动生成编码，用于排序与展示",
+      readonly: true
+    },
+    {
+      key: "parentTaskId",
+      label: "父任务ID",
+      type: "text",
+      required: false,
+      priority: "optional",
+      section: "advanced",
+      placeholder: "可选，填写父任务ID"
+    },
+    {
+      key: "predecessorTaskIds",
+      label: "前置任务IDs",
+      type: "text",
+      required: false,
+      priority: "optional",
+      section: "advanced",
+      placeholder: "多个ID用逗号分隔"
+    },
+    {
+      key: "milestoneId",
+      label: "关联里程碑ID",
+      type: "text",
+      required: false,
+      priority: "optional",
+      section: "advanced"
+    },
+    {
+      key: "sortOrder",
+      label: "排序",
+      type: "number",
+      required: false,
+      priority: "optional",
+      section: "advanced"
+    },
+    {
+      key: "level1Stage",
+      label: "一级阶段",
+      type: "select",
+      required: true,
+      options: stageOptions,
+      priority: "core",
+      section: "detail",
+      helpText: "请选择任务所属一级阶段",
+      inheritable: true
+    },
+    {
+      key: "level2WorkPackage",
+      label: "二级工作包",
+      type: "text",
+      required: true,
+      priority: "core",
+      section: "detail",
+      placeholder: "例如：需求分析、接口联调、测试验收",
+      helpText: "建议按可管理的工作包粒度填写",
+      inheritable: true
+    },
+    {
+      key: "taskName",
+      label: "任务名称",
+      type: "text",
+      required: true,
+      priority: "core",
+      section: "detail",
+      placeholder: "例如：完成接口联调方案评审",
+      hint: "建议动词 + 对象，可判断完成与否",
+      helpText: "任务名称应可判断是否完成，避免模糊表述",
+      example: "完成项目计划评审"
+    },
+    {
+      key: "taskDetail",
+      label: "具体任务",
+      type: "textarea",
+      required: true,
+      priority: "recommended",
+      section: "detail",
+      placeholder: "填写任务范围、关键动作、完成标准",
+      helpText: "建议包含输入、输出和完成判定"
+    },
+    {
+      key: "deliverable",
+      label: "交付物",
+      type: "text",
+      required: true,
+      priority: "recommended",
+      section: "detail",
+      placeholder: "例如：评审纪要、设计文档、测试报告",
+      inheritable: true
+    },
+    {
+      key: "taskOwner",
+      label: "任务责任人",
+      type: "text",
+      required: true,
+      priority: "core",
+      section: "detail",
+      helpText: "填写直接负责推进该任务的人员",
+      example: "张三",
+      inheritable: true
+    },
+    {
+      key: "plannedStartDate",
+      label: "计划开始时间",
+      type: "date",
+      required: true,
+      priority: "core",
+      section: "detail",
+      helpText: "按计划排期填写，建议与计划完成时间成对设置",
+      inheritable: true
+    },
+    {
+      key: "plannedEndDate",
+      label: "计划完成时间",
+      type: "date",
+      required: true,
+      priority: "core",
+      section: "detail",
+      helpText: "不得早于计划开始时间",
+      inheritable: true
+    },
+    {
+      key: "currentStatus",
+      label: "当前状态",
+      type: "select",
+      required: true,
+      options: taskStatusOptions,
+      priority: "recommended",
+      section: "detail",
+      helpText: "新增任务默认建议“未开始”",
+      inheritable: true
+    },
+    {
+      key: "isCritical",
+      label: "是否关键任务",
+      type: "select",
+      required: true,
+      options: ynOptions,
+      priority: "recommended",
+      section: "detail",
+      helpText: "关键任务通常影响里程碑或主路径",
+      inheritable: true
+    },
+    {
+      key: "riskHint",
+      label: "风险点说明",
+      type: "textarea",
+      required: false,
+      priority: "optional",
+      section: "advanced",
+      placeholder: "如有延期风险或依赖风险，可补充说明",
+      visibleWhen: { key: "currentStatus", equals: "延期" }
+    },
+    {
+      key: "linkedMasterTask",
+      label: "关联总表任务",
+      type: "text",
+      required: false,
+      priority: "optional",
+      section: "advanced",
+      placeholder: "可选，填写关联的主任务编号/名称",
+      inheritable: true
+    }
   ],
   milestones: [
     { key: "projectId", label: "项目ID", type: "text", required: true },
@@ -45,6 +214,7 @@ export const formSchemas: Record<string, FormField[]> = {
     { key: "actualFinishDate", label: "实际完成时间", type: "date", required: false },
     { key: "owner", label: "责任人", type: "text", required: true },
     { key: "currentStatus", label: "当前状态", type: "select", required: true, options: taskStatusOptions },
+    { key: "supportTaskIds", label: "支撑任务IDs", type: "text", required: false, hint: "多个ID使用逗号分隔" },
     { key: "note", label: "备注", type: "textarea", required: false }
   ],
   progressRecords: [

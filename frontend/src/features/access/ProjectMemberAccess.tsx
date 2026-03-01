@@ -1,4 +1,5 @@
-import { Button, Card, Col, Row, Select, Space, Table } from "antd";
+import { Button, Card, Col, Row, Select, Space } from "antd";
+import { AppTable } from "../../components/AppTable";
 
 interface UserOption {
   id: string;
@@ -62,7 +63,7 @@ export function ProjectMemberAccess({ visible, users, members, memberForm, setMe
         </Col>
       </Row>
 
-      <Table
+      <AppTable
         style={{ marginTop: 16 }}
         rowKey="id"
         columns={[
@@ -76,4 +77,3 @@ export function ProjectMemberAccess({ visible, users, members, memberForm, setMe
     </Card>
   );
 }
-

@@ -5,6 +5,11 @@ const status = z.enum(["未开始", "进行中", "已完成", "延期"]);
 const trafficLight = z.enum(["绿", "黄", "红"]);
 const yn = z.enum(["是", "否"]);
 const dateString = z.string().min(8);
+const wbsStatusValues = ["未开始", "进行中", "已完成", "延期"] as const;
+const reportType = z.enum(["WEEKLY", "MONTHLY"]);
+const reportStatus = z.enum(["DRAFT", "SUBMITTED"]);
+const wbsCodePattern = /^\d+(?:\.\d+)*$/;
+const uuidLike = z.string().min(1);
 
 export const createProjectSchema = z.object({
   projectName: z.string().min(1),
@@ -21,6 +26,15 @@ export const createProjectSchema = z.object({
 
 export const createWbsSchema = z.object({
   projectId: z.string().min(1),
+  wbsCode: z
+    .string()
+    .trim()
+    .regex(wbsCodePattern, "WBS编码格式不合法，应为 1 或 1.2.3")
+    .optional(),
+  parentTaskId: uuidLike.optional(),
+  predecessorTaskIds: z.array(uuidLike).optional(),
+  milestoneId: uuidLike.optional(),
+  sortOrder: z.coerce.number().int().optional(),
   level1Stage: stage,
   level2WorkPackage: z.string().min(1),
   taskName: z.string().min(1),
@@ -33,6 +47,32 @@ export const createWbsSchema = z.object({
   isCritical: yn,
   riskHint: z.string().optional(),
   linkedMasterTask: z.string().optional()
+});
+
+export const createWbsBatchSchema = z.object({
+  projectId: z.string().min(1),
+  items: z.array(createWbsSchema).min(1)
+});
+
+export const validateWbsPlanSchema = z.object({
+  projectId: z.string().min(1),
+  items: z.array(createWbsSchema).min(1)
+});
+
+export const quickWbsSuggestionSchema = z.object({
+  projectId: z.string().min(1),
+  prompt: z.string().trim().min(2).max(200),
+  mode: z.enum(["light", "standard", "complete"]).default("standard"),
+  targetStage: stage.optional()
+});
+
+export const updateWbsStatusSchema = z.object({
+  projectId: z.string().min(1),
+  currentStatus: z
+    .string()
+    .refine((value): value is (typeof wbsStatusValues)[number] => wbsStatusValues.includes(value as (typeof wbsStatusValues)[number]), {
+      message: "任务状态不合法"
+    })
 });
 
 export const createMilestoneSchema = z.object({
@@ -111,4 +151,19 @@ export const createChangeSchema = z.object({
   approvalDate: z.string().optional(),
   currentStatus: status,
   note: z.string().optional()
+});
+
+export const upsertProjectReportSchema = z.object({
+  projectId: z.string().min(1),
+  reportType,
+  period: z.string().min(4),
+  status: reportStatus,
+  content: z.string().min(1),
+  sourceSnapshot: z.unknown().optional()
+});
+
+export const generateProjectReportSchema = z.object({
+  projectId: z.string().min(1),
+  reportType,
+  period: z.string().min(4)
 });

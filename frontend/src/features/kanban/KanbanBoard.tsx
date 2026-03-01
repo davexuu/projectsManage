@@ -9,9 +9,12 @@ interface WbsTaskRow extends Record<string, unknown> {
   id: string;
   projectId: string;
   taskName: string;
+  level1Stage: string;
   level2WorkPackage: string;
   taskOwner: string;
   currentStatus: TaskStatus;
+  plannedStartDate?: string;
+  plannedEndDate?: string;
 }
 
 interface Props {
@@ -35,6 +38,23 @@ function inDateRange(start: string, end: string, rangeStart?: string, rangeEnd?:
   const rs = rangeStart ? new Date(rangeStart).getTime() : Number.NEGATIVE_INFINITY;
   const re = rangeEnd ? new Date(rangeEnd).getTime() : Number.POSITIVE_INFINITY;
   return e >= rs && s <= re;
+}
+
+function formatDate(dateStr?: string): string {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${month}-${day}`;
+}
+
+function formatDateRange(startDate?: string, endDate?: string): string {
+  const start = formatDate(startDate);
+  const end = formatDate(endDate);
+  if (!start && !end) return "计划：待定";
+  if (start && end) return `计划：${start} 至 ${end}`;
+  if (start) return `计划：${start} 至 待定`;
+  return `计划：待定 至 ${end}`;
 }
 
 export function KanbanBoard({ projectId, stage, startDate, endDate }: Props) {
@@ -82,6 +102,7 @@ export function KanbanBoard({ projectId, stage, startDate, endDate }: Props) {
   }, [tasks, stage, startDate, endDate]);
 
   const moveTask = async (taskId: string, targetStatus: TaskStatus) => {
+    if (!taskId) return;
     const task = tasks.find((t) => t.id === taskId);
     if (!task || task.currentStatus === targetStatus) return;
 
@@ -90,8 +111,8 @@ export function KanbanBoard({ projectId, stage, startDate, endDate }: Props) {
     setTasks(next);
 
     try {
-      await api.update("wbs", taskId, {
-        ...task,
+      await api.updateWbsStatus(taskId, {
+        projectId: task.projectId,
         currentStatus: targetStatus
       });
       message.success(`任务已更新为「${targetStatus}」`);
@@ -122,7 +143,12 @@ export function KanbanBoard({ projectId, stage, startDate, endDate }: Props) {
                 style={{ minHeight: 420, background: "#fafafa" }}
                 bodyStyle={{ display: "flex", flexDirection: "column", gap: 8 }}
                 onDragOver={(e) => e.preventDefault()}
-                onDrop={() => moveTask(draggingId, column.key).catch((e) => message.error(getErrorMessage(e)))}
+                onDrop={() => {
+                  if (!draggingId) return;
+                  moveTask(draggingId, column.key)
+                    .catch((e) => message.error(getErrorMessage(e)))
+                    .finally(() => setDraggingId(""));
+                }}
               >
                 {grouped[column.key].length === 0 ? (
                   <Typography.Text type="secondary">暂无任务</Typography.Text>
@@ -140,7 +166,15 @@ export function KanbanBoard({ projectId, stage, startDate, endDate }: Props) {
                       <Typography.Text strong>{String(task.taskName ?? "")}</Typography.Text>
                       <br />
                       <Typography.Text type="secondary">
+                        阶段：{String(task.level1Stage ?? "-")}
+                      </Typography.Text>
+                      <br />
+                      <Typography.Text type="secondary">
                         工作包：{String(task.level2WorkPackage ?? "-")}
+                      </Typography.Text>
+                      <br />
+                      <Typography.Text type="secondary">
+                        {formatDateRange(task.plannedStartDate, task.plannedEndDate)}
                       </Typography.Text>
                       <br />
                       <Typography.Text type="secondary">

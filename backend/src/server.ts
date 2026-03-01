@@ -33,7 +33,10 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
     return res.status(400).json({ message: "参数校验失败", errors: err.issues });
   }
   if (err instanceof BusinessError) {
-    return res.status(err.status).json({ message: err.message });
+    return res.status(err.status).json({
+      message: err.message,
+      ...(err.details !== undefined ? { details: err.details } : {})
+    });
   }
 
   const message = err instanceof Error ? err.message : "服务内部错误";

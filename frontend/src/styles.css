@@ -6,6 +6,14 @@
   --text: #1d2939;
   --line: #d0d5dd;
   --brand: #0f766e;
+  --table-header-bg-start: #f8fbff;
+  --table-header-bg-end: #eef3fa;
+  --table-header-text: #0f172a;
+  --table-border: #d9e1ec;
+  --table-row-border: #e6ebf2;
+  --table-zebra-bg: #fafcff;
+  --table-hover-bg: #e8f2ff;
+  --table-empty-bg: #f8fbff;
 }
 
 * {
@@ -258,6 +266,58 @@ small {
   border-bottom: none;
 }
 
+.org-dept-search {
+  margin-bottom: 12px;
+}
+
+.org-dept-actions {
+  margin-bottom: 12px;
+}
+
+.org-dept-row-selected > td {
+  background: #f0f7ff !important;
+}
+
+.app-table--element .ant-table-container {
+  border-radius: 12px !important;
+  overflow: hidden;
+  border: 1px solid var(--table-border) !important;
+}
+
+.app-table--element .ant-table-thead > tr > th {
+  background: linear-gradient(180deg, var(--table-header-bg-start) 0%, var(--table-header-bg-end) 100%) !important;
+  color: var(--table-header-text);
+  font-weight: 600;
+  border-bottom: 1px solid #cfd8e6 !important;
+}
+
+.app-table--element .ant-table-tbody > tr > td {
+  border-bottom: 1px solid var(--table-row-border) !important;
+}
+
+.app-table--element .ant-table-tbody > tr:nth-child(even) > td {
+  background: var(--table-zebra-bg);
+}
+
+.app-table--element .ant-table-tbody > tr.ant-table-row:hover > td {
+  background: var(--table-hover-bg) !important;
+}
+
+.app-table--element .ant-table-placeholder {
+  background: var(--table-empty-bg);
+}
+
+.app-table--element .ant-table-cell {
+  padding-top: 10px !important;
+  padding-bottom: 10px !important;
+}
+
+.app-table--element .ant-table-pagination.ant-pagination {
+  margin: 12px 0 0 0;
+  padding-top: 10px;
+  border-top: 1px dashed #d8e0ec;
+}
+
 .ant-select .ant-select-selection-search-input {
   border: none !important;
   padding: 0 !important;
@@ -274,6 +334,14 @@ small {
 
 .entity-s2 .s2-container {
   min-height: 360px;
+}
+
+.wbs-entry-section {
+  border-radius: 12px;
+}
+
+.wbs-batch-row-error > td {
+  background: #fff1f0 !important;
 }
 
 .entity-s2-footer {
@@ -490,6 +558,25 @@ small {
   background: #111827;
 }
 
+.gantt-task-highlight .bar {
+  stroke: #111827;
+  stroke-width: 2;
+}
+
+.gantt-task-conflict .bar {
+  stroke: #ef4444;
+  stroke-width: 2;
+  stroke-dasharray: 4 2;
+}
+
+.gantt-legend.gantt-highlight-legend {
+  background: #111827;
+}
+
+.gantt-legend.gantt-conflict-legend {
+  background: #ef4444;
+}
+
 .ghost-btn {
   background: #fff;
   color: #334155;
@@ -514,4 +601,20 @@ small {
   .nav-submenu {
     padding-left: 0;
   }
+}
+
+.mission-control-motion {
+  transition: transform 140ms ease, opacity 140ms ease, box-shadow 140ms ease;
+}
+
+.mission-control-motion:hover {
+  transform: translateY(-1px);
+}
+
+.planning-row-selected > td {
+  background: #e8f2ff !important;
+}
+
+.planning-row-conflict > td {
+  background: #fff1f0 !important;
 }

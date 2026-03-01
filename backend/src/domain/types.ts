@@ -25,7 +25,25 @@ export interface Project {
   updatedAt: string;
 }
 
+export interface ProjectAttachment {
+  id: string;
+  projectId: string;
+  category: string;
+  fileName: string;
+  objectKey: string;
+  mimeType?: string;
+  fileSize: string;
+  uploaderId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface WbsTask extends BaseEntity {
+  wbsCode?: string;
+  parentTaskId?: string;
+  predecessorTaskIds?: string[];
+  milestoneId?: string;
+  sortOrder?: number;
   level1Stage: Stage;
   level2WorkPackage: string;
   taskName: string;
@@ -40,6 +58,18 @@ export interface WbsTask extends BaseEntity {
   linkedMasterTask?: string;
 }
 
+export type WbsQuickIntent = "新增" | "修复" | "优化" | "合规";
+export type WbsSuggestionMode = "light" | "standard" | "complete";
+
+export interface WbsQuickSuggestionResult {
+  intent: WbsQuickIntent;
+  mode: WbsSuggestionMode;
+  targetStage: Stage;
+  normalizedPrompt: string;
+  reason: string;
+  items: Array<Omit<WbsTask, "id" | "createdAt" | "updatedAt">>;
+}
+
 export interface Milestone extends BaseEntity {
   milestoneCode: string;
   milestoneName: string;
@@ -52,6 +82,13 @@ export interface Milestone extends BaseEntity {
   owner: string;
   currentStatus: TaskStatus;
   note?: string;
+  linkWarning?: string;
+  linkedTaskSummaries?: Array<{
+    id: string;
+    taskName: string;
+    wbsCode?: string;
+    currentStatus: TaskStatus;
+  }>;
 }
 
 export interface ProgressRecord extends BaseEntity {
@@ -113,6 +150,14 @@ export interface ChangeRequest extends BaseEntity {
   note?: string;
 }
 
+export interface ProjectReport extends BaseEntity {
+  reportType: "WEEKLY" | "MONTHLY";
+  period: string;
+  status: "DRAFT" | "SUBMITTED";
+  content: string;
+  sourceSnapshot?: unknown;
+}
+
 export interface FormField {
   key: string;
   label: string;
@@ -120,4 +165,18 @@ export interface FormField {
   required: boolean;
   options?: string[];
   hint?: string;
+  priority?: "core" | "recommended" | "optional" | "auto";
+  placeholder?: string;
+  helpText?: string;
+  example?: string;
+  section?: "context" | "detail" | "advanced";
+  visibleWhen?: {
+    key: string;
+    equals?: string;
+    notEquals?: string;
+    isTruthy?: boolean;
+  };
+  defaultValueResolver?: "selectedProjectId" | "previousRow";
+  inheritable?: boolean;
+  readonly?: boolean;
 }

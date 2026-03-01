@@ -1,42 +1,60 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
-import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import {
   ApartmentOutlined,
   AppstoreOutlined,
+  CalendarOutlined,
   BarsOutlined,
+  CompassOutlined,
   DashboardOutlined,
   FileSyncOutlined,
+  FlagOutlined,
+  HomeOutlined,
   LogoutOutlined,
   LineChartOutlined,
-  SafetyCertificateOutlined,
+  NotificationOutlined,
+  RocketOutlined,
   SettingOutlined,
   TeamOutlined
 } from "@ant-design/icons";
-import { Button, Card, Cascader, DatePicker, Layout, Menu, Modal, Select, Space, Spin, Typography, message } from "antd";
-import dayjs from "dayjs";
+import { Button, Card, DatePicker, Layout, Menu, Select, Space, Spin, Typography, message } from "antd";
 import type { Dayjs } from "dayjs";
 import { api, SystemEntityMeta } from "./api/client";
-import { DynamicForm } from "./components/DynamicForm";
-import { EntityTable } from "./components/EntityTable";
 import type { LoginUser } from "./features/auth/LoginPanel";
 import type { DictionaryItem } from "./features/system/DictionaryManager";
 import type { OrganizationNode } from "./features/system/OrganizationManager";
-import { FieldType, FormField, FormSchemaMap, ModuleConfig } from "./types";
+import { ModuleRoute } from "./features/module/ModuleRoute";
+import { PROCESS_NAVIGATION, type ProcessKey, resolveProcessMenuKey } from "./features/process/navigation-config";
+import { FormSchemaMap, ModuleConfig } from "./types";
 import { getErrorMessage } from "./utils/errors";
 
 const { Header, Sider, Content } = Layout;
 const { RangePicker } = DatePicker;
 
 const LoginPanel = lazy(() => import("./features/auth/LoginPanel").then((m) => ({ default: m.LoginPanel })));
-const ProjectDashboard = lazy(() => import("./features/dashboard/ProjectDashboard").then((m) => ({ default: m.ProjectDashboard })));
 const ImportPanel = lazy(() => import("./features/import/ImportPanel").then((m) => ({ default: m.ImportPanel })));
 const KanbanBoard = lazy(() => import("./features/kanban/KanbanBoard").then((m) => ({ default: m.KanbanBoard })));
 const BurndownChart = lazy(() => import("./features/charts/BurndownChart").then((m) => ({ default: m.BurndownChart })));
 const GanttChart = lazy(() => import("./features/charts/GanttChart").then((m) => ({ default: m.GanttChart })));
-const ProjectMemberAccess = lazy(() => import("./features/access/ProjectMemberAccess").then((m) => ({ default: m.ProjectMemberAccess })));
 const DictionaryManager = lazy(() => import("./features/system/DictionaryManager").then((m) => ({ default: m.DictionaryManager })));
 const OrganizationManager = lazy(() => import("./features/system/OrganizationManager").then((m) => ({ default: m.OrganizationManager })));
 const SystemEntityManager = lazy(() => import("./features/system/SystemEntityManager").then((m) => ({ default: m.SystemEntityManager })));
+const UserManager = lazy(() => import("./features/system/UserManager").then((m) => ({ default: m.UserManager })));
+const MissionControlPage = lazy(() =>
+  import("./features/mission-control/MissionControlPage").then((m) => ({ default: m.MissionControlPage }))
+);
+const WorkspacePanel = lazy(() =>
+  import("./features/workspace/WorkspacePanel").then((m) => ({ default: m.WorkspacePanel }))
+);
+const ProcessWorkspace = lazy(() =>
+  import("./features/process/ProcessWorkspace").then((m) => ({ default: m.ProcessWorkspace }))
+);
+const ProjectReportEditor = lazy(() =>
+  import("./features/reports/ProjectReportEditor").then((m) => ({ default: m.ProjectReportEditor }))
+);
+const PlanningStudio = lazy(() =>
+  import("./features/planning/PlanningStudio").then((m) => ({ default: m.PlanningStudio }))
+);
 
 const modules: ModuleConfig[] = [
   { key: "projects", label: "项目立项卡", endpoint: "projects" },
@@ -48,399 +66,13 @@ const modules: ModuleConfig[] = [
   { key: "changes", label: "变更申请", endpoint: "changes" }
 ];
 
-type SearchMode = "text" | "select" | "user" | "multi-user" | "year";
-
-interface SearchFieldConfig {
-  key: string;
-  mode: SearchMode;
-}
-
-const moduleSearchFields: Record<string, SearchFieldConfig[]> = {
-  projects: [
-    { key: "projectName", mode: "text" },
-    { key: "year", mode: "year" },
-    { key: "leadDepartment", mode: "select" },
-    { key: "projectOwner", mode: "user" },
-    { key: "participants", mode: "multi-user" }
-  ]
-};
-
-const extraColumnLabels: Record<string, string> = {
-  id: "ID",
-  projectId: "项目ID",
-  createdAt: "创建时间",
-  updatedAt: "更新时间"
-};
-
 function optionsToUnique(options: string[]) {
   return [...new Set(options.map((opt) => opt.trim()).filter(Boolean))];
-}
-
-function splitUserValues(value: unknown) {
-  return String(value ?? "")
-    .split(/[;,，、]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function asString(value: string | string[] | undefined) {
-  return typeof value === "string" ? value : "";
-}
-
-interface DepartmentCascaderOption {
-  value: string;
-  label: string;
-  children?: DepartmentCascaderOption[];
-}
-
-function toDepartmentCascaderOptions(nodes: OrganizationNode[]): DepartmentCascaderOption[] {
-  return nodes.map((node) => ({
-    value: node.id,
-    label: node.name,
-    children: toDepartmentCascaderOptions(node.children ?? [])
-  }));
-}
-
-function buildDepartmentLookup(nodes: OrganizationNode[]) {
-  const descendants = new Map<string, string[]>();
-  const names = new Map<string, string>();
-  const namePaths = new Map<string, string[]>();
-
-  const walk = (list: OrganizationNode[], parentPath: string[] = []): string[] => {
-    const acc: string[] = [];
-    list.forEach((node) => {
-      const currentPath = [...parentPath, node.id];
-      names.set(node.id, node.name);
-      if (!namePaths.has(node.name)) {
-        namePaths.set(node.name, currentPath);
-      }
-      const childNames = walk(node.children ?? [], currentPath);
-      const inScope = optionsToUnique([node.name, ...childNames]);
-      descendants.set(node.id, inScope);
-      acc.push(...inScope);
-    });
-    return optionsToUnique(acc);
-  };
-
-  walk(nodes);
-  return { descendants, names, namePaths };
 }
 
 interface ProjectOption {
   id: string;
   projectName: string;
-}
-
-interface ModuleRouteProps {
-  moduleMap: Map<string, ModuleConfig>;
-  schemas: FormSchemaMap;
-  dictItems: DictionaryItem[];
-  departmentOptions: string[];
-  departmentTree: OrganizationNode[];
-  userOptions: string[];
-  yearOptions: string[];
-  selectedProjectId: string;
-  rows: Record<string, unknown>[];
-  onModuleChange: (moduleKey: string) => void;
-  onCreate: (payload: Record<string, unknown>, moduleKey: string) => Promise<void>;
-  onUpdate: (payload: Record<string, unknown>, moduleKey: string, id: string) => Promise<void>;
-  onDelete: (moduleKey: string, id: string, projectId?: string) => Promise<void>;
-}
-
-function ModuleRoute({
-  moduleMap,
-  schemas,
-  dictItems,
-  departmentOptions,
-  departmentTree,
-  userOptions,
-  yearOptions,
-  selectedProjectId,
-  rows,
-  onModuleChange,
-  onCreate,
-  onUpdate,
-  onDelete
-}: ModuleRouteProps) {
-  const params = useParams();
-  const moduleKey = params.moduleKey || "projects";
-  const module = moduleMap.get(moduleKey);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingRow, setEditingRow] = useState<Record<string, unknown> | null>(null);
-  const [searchValues, setSearchValues] = useState<Record<string, string | string[]>>({});
-  const [departmentPath, setDepartmentPath] = useState<string[]>([]);
-
-  useEffect(() => {
-    if (module) {
-      onModuleChange(moduleKey);
-      setDialogOpen(false);
-      setEditingRow(null);
-      setSearchValues({});
-      setDepartmentPath([]);
-    }
-  }, [moduleKey, module, onModuleChange]);
-
-  if (!module) return <Navigate to="/module/projects" replace />;
-
-  const fields = schemas[module.key] ?? [];
-  const searchFieldConfigs = moduleSearchFields[module.key] ?? [];
-  const needProject = module.endpoint !== "projects";
-  const initialValues = {
-    ...(needProject && selectedProjectId ? { projectId: selectedProjectId } : {}),
-    ...(editingRow || {})
-  };
-
-  const columnLabels = useMemo(
-    () => ({
-      ...extraColumnLabels,
-      ...Object.fromEntries(fields.map((field) => [field.key, field.label]))
-    }),
-    [fields]
-  );
-  const departmentCascaderOptions = useMemo(
-    () => toDepartmentCascaderOptions(departmentTree),
-    [departmentTree]
-  );
-  const departmentLookup = useMemo(() => buildDepartmentLookup(departmentTree), [departmentTree]);
-
-  const filteredRows = useMemo(() => {
-    if (searchFieldConfigs.length === 0) return rows;
-    return rows.filter((row) =>
-      searchFieldConfigs.every((config) => {
-        if (config.key === "leadDepartment") {
-          if (departmentPath.length === 0) return true;
-          const value = String(row[config.key] ?? "").trim();
-          if (!value) return false;
-          const selectedNodeId = departmentPath[departmentPath.length - 1];
-          const candidates = departmentLookup.descendants.get(selectedNodeId) ?? [];
-          if (candidates.length > 0) return candidates.includes(value);
-          const selectedName = departmentLookup.names.get(selectedNodeId) ?? "";
-          return selectedName ? value === selectedName : false;
-        }
-        if (config.mode === "multi-user") {
-          const rawValue = searchValues[config.key];
-          const selectedUsers: string[] = Array.isArray(rawValue) ? rawValue : [];
-          if (selectedUsers.length === 0) return true;
-          const rowUsers = splitUserValues(row[config.key]);
-          return selectedUsers.some((user: string) => rowUsers.includes(user));
-        }
-        const text = asString(searchValues[config.key]).trim();
-        if (!text) return true;
-        const value = String(row[config.key] ?? "");
-        if (config.mode === "select") return value === text;
-        return value.toLowerCase().includes(text.toLowerCase());
-      })
-    );
-  }, [rows, searchFieldConfigs, searchValues, departmentPath, departmentLookup]);
-
-  const searchableOptions = useMemo(() => {
-    const out: Record<string, string[]> = {};
-    searchFieldConfigs.forEach((config) => {
-      const values =
-        config.mode === "multi-user"
-          ? optionsToUnique(rows.flatMap((r) => splitUserValues(r[config.key])))
-          : [...new Set(rows.map((r) => String(r[config.key] ?? "").trim()).filter(Boolean))];
-      const fromDict = dictItems.find((item) => item.key === config.key)?.options ?? [];
-      if (config.key === "year") out[config.key] = optionsToUnique([...yearOptions, ...values]).sort((a, b) => Number(b) - Number(a));
-      else if (fromDict.length > 0) out[config.key] = fromDict;
-      else if (config.key === "leadDepartment" && departmentOptions.length > 0) out[config.key] = departmentOptions;
-      else if (config.key === "projectOwner" && userOptions.length > 0) out[config.key] = userOptions;
-      else out[config.key] = values;
-    });
-    return out;
-  }, [rows, searchFieldConfigs, dictItems, departmentOptions, userOptions, yearOptions]);
-
-  const dynamicFields = useMemo<FormField[]>(() => {
-    if (module.key !== "projects") return fields;
-    const dictMap = new Map(dictItems.map((item) => [item.key, item.options]));
-    return fields.map((field) => {
-      const dictOptions = dictMap.get(field.key);
-      if (field.key === "projectType" && dictOptions) return { ...field, type: "select" as FieldType, options: dictOptions };
-      if (field.key === "year") return { ...field, type: "select" as FieldType, options: yearOptions };
-      if (field.key === "leadDepartment") return { ...field, type: "select" as FieldType, options: departmentOptions };
-      if (field.key === "projectOwner") return { ...field, type: "select" as FieldType, options: userOptions };
-      if (field.key === "participants") return { ...field, type: "multiselect" as FieldType, options: userOptions };
-      return field;
-    });
-  }, [module.key, fields, dictItems, departmentOptions, userOptions, yearOptions]);
-
-  const handleDeleteOne = (row: Record<string, unknown>) => {
-    const rowId = String(row.id ?? "");
-    if (!rowId) return;
-    const projectId =
-      module.key === "projects" ? undefined : String(row.projectId ?? selectedProjectId ?? "").trim() || undefined;
-    Modal.confirm({
-      title: "确认删除该记录？",
-      content: "删除后不可恢复。",
-      okButtonProps: { danger: true },
-      onOk: () => onDelete(module.key, rowId, projectId).catch((e) => message.error(getErrorMessage(e)))
-    });
-  };
-
-  const handleBatchDelete = (selectedRows: Record<string, unknown>[]) => {
-    const ids = selectedRows
-      .map((row) => ({
-        id: String(row.id ?? "").trim(),
-        projectId: module.key === "projects" ? undefined : String(row.projectId ?? selectedProjectId ?? "").trim() || undefined
-      }))
-      .filter((item) => Boolean(item.id));
-    const tasks = ids.map((item) => () => onDelete(module.key, item.id, item.projectId));
-    if (tasks.length === 0) return;
-    Modal.confirm({
-      title: `确认删除选中的 ${tasks.length} 条记录？`,
-      content: "删除后不可恢复。",
-      okButtonProps: { danger: true },
-      onOk: async () => {
-        try {
-          await Promise.all(tasks.map((fn) => fn()));
-          message.success(`已删除 ${tasks.length} 条记录`);
-        } catch (e) {
-          message.error(getErrorMessage(e));
-        }
-      }
-    });
-  };
-
-  return (
-    <>
-      {needProject && !selectedProjectId ? <Card style={{ marginBottom: 16 }}>请选择项目后再录入该模块。</Card> : null}
-
-      {searchFieldConfigs.length > 0 ? (
-        <Card title="筛选" style={{ marginBottom: 16 }}>
-          <Space wrap>
-            {searchFieldConfigs.map((config) =>
-              config.mode === "year" ? (
-                <DatePicker
-                  key={config.key}
-                  picker="year"
-                  allowClear
-                  style={{ width: 220 }}
-                  placeholder={columnLabels[config.key] ?? config.key}
-                  value={asString(searchValues[config.key]) ? dayjs(asString(searchValues[config.key]), "YYYY") : null}
-                  onChange={(value) =>
-                    setSearchValues((prev) => ({ ...prev, [config.key]: value ? value.format("YYYY") : "" }))
-                  }
-                />
-              ) : config.mode === "select" ? (
-                config.key === "leadDepartment" ? (
-                  <Cascader
-                    key={config.key}
-                    style={{ width: 220 }}
-                    placeholder={columnLabels[config.key] ?? config.key}
-                    allowClear
-                    showSearch
-                    changeOnSelect
-                    value={departmentPath.length > 0 ? departmentPath : undefined}
-                    options={departmentCascaderOptions}
-                    onChange={(value) => setDepartmentPath((value as string[]) ?? [])}
-                  />
-                ) : (
-                  <Select
-                    key={config.key}
-                    style={{ width: 220 }}
-                    placeholder={columnLabels[config.key] ?? config.key}
-                    allowClear
-                    value={asString(searchValues[config.key]) || undefined}
-                    options={(searchableOptions[config.key] ?? []).map((opt) => ({ label: opt, value: opt }))}
-                    onChange={(value) => setSearchValues((prev) => ({ ...prev, [config.key]: value || "" }))}
-                  />
-                )
-              ) : config.mode === "multi-user" ? (
-                <Select
-                  key={config.key}
-                  mode="multiple"
-                  showSearch
-                  allowClear
-                  style={{ width: 320 }}
-                  placeholder={`请选择${columnLabels[config.key] ?? config.key}`}
-                  value={Array.isArray(searchValues[config.key]) ? searchValues[config.key] : []}
-                  options={(searchableOptions[config.key] ?? []).map((opt) => ({ label: opt, value: opt }))}
-                  optionFilterProp="label"
-                  filterOption={(input, option) => String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
-                  onChange={(value) => setSearchValues((prev) => ({ ...prev, [config.key]: value ?? [] }))}
-                />
-              ) : config.mode === "user" ? (
-                <Select
-                  key={config.key}
-                  showSearch
-                  allowClear
-                  style={{ width: 220 }}
-                  placeholder={`请输入${columnLabels[config.key] ?? config.key}`}
-                  value={asString(searchValues[config.key]) || undefined}
-                  options={(searchableOptions[config.key] ?? []).map((opt) => ({ label: opt, value: opt }))}
-                  optionFilterProp="label"
-                  filterOption={(input, option) => String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
-                  onChange={(value) => setSearchValues((prev) => ({ ...prev, [config.key]: value || "" }))}
-                />
-              ) : (
-                <Select
-                  key={config.key}
-                  showSearch
-                  allowClear
-                  style={{ width: 220 }}
-                  placeholder={`请输入${columnLabels[config.key] ?? config.key}`}
-                  value={asString(searchValues[config.key]) || undefined}
-                  options={(searchableOptions[config.key] ?? []).map((opt) => ({ label: opt, value: opt }))}
-                  onChange={(value) => setSearchValues((prev) => ({ ...prev, [config.key]: value || "" }))}
-                />
-              )
-            )}
-          </Space>
-        </Card>
-      ) : null}
-
-      {dynamicFields.length > 0 ? (
-        <Card style={{ marginBottom: 16 }}>
-          <Button type="primary" onClick={() => { setEditingRow(null); setDialogOpen(true); }}>
-            新增记录
-          </Button>
-        </Card>
-      ) : null}
-
-      <EntityTable
-        title={`${module.label}列表`}
-        rows={filteredRows}
-        columnLabels={columnLabels}
-        onEdit={dynamicFields.length > 0 ? (row) => { setEditingRow(row); setDialogOpen(true); } : undefined}
-        onDelete={dynamicFields.length > 0 ? handleDeleteOne : undefined}
-        onBatchDelete={dynamicFields.length > 0 ? handleBatchDelete : undefined}
-      />
-
-      <Modal open={dialogOpen} onCancel={() => setDialogOpen(false)} footer={null} width={980} destroyOnClose>
-        <DynamicForm
-          fields={dynamicFields}
-          title={editingRow ? "编辑记录" : "新增记录"}
-          submitText={editingRow ? "保存" : "提交"}
-          initialValues={initialValues}
-          enableDraft={module.key === "projects"}
-          draftStorageKey={`pmp:${module.key}:create-draft`}
-          departmentCascaderOptions={module.key === "projects" ? departmentCascaderOptions : undefined}
-          departmentNamePathMap={module.key === "projects" ? departmentLookup.namePaths : undefined}
-          departmentIdNameMap={module.key === "projects" ? departmentLookup.names : undefined}
-          onCancel={() => setDialogOpen(false)}
-          onSubmit={async (payload) => {
-            if (needProject && !payload.projectId) payload.projectId = selectedProjectId;
-            if (module.key === "projects") {
-              const projectName = String(payload.projectName ?? "").trim();
-              const duplicate = rows.some(
-                (row) => String(row.projectName ?? "").trim() === projectName && String(row.id) !== String(editingRow?.id ?? "")
-              );
-              if (duplicate) {
-                message.warning("项目名称已存在，请保持唯一。");
-                return;
-              }
-              const yearNum = Number(payload.year);
-              payload.year = Number.isNaN(yearNum) ? undefined : yearNum;
-            }
-            if (editingRow?.id) await onUpdate(payload, module.key, String(editingRow.id));
-            else await onCreate(payload, module.key);
-            setDialogOpen(false);
-            setEditingRow(null);
-          }}
-        />
-      </Modal>
-    </>
-  );
 }
 
 export default function App() {
@@ -459,11 +91,6 @@ export default function App() {
   const [systemRows, setSystemRows] = useState<Array<Record<string, unknown>>>([]);
   const [dashboard, setDashboard] = useState<Record<string, unknown> | null>(null);
   const [users, setUsers] = useState<Array<{ id: string; displayName: string; role: string }>>([]);
-  const [members, setMembers] = useState<Array<{ id: string; userId: string; accessRole: string }>>([]);
-  const [memberForm, setMemberForm] = useState<{ userId: string; accessRole: "OWNER" | "EDITOR" | "VIEWER" }>({
-    userId: "",
-    accessRole: "VIEWER"
-  });
   const [importPath, setImportPath] = useState("/Users/xucong/Desktop/PMP项目管理工具模板.xlsx");
   const [importSummary, setImportSummary] = useState<Record<string, unknown> | null>(null);
   const [commitResult, setCommitResult] = useState<Record<string, unknown> | null>(null);
@@ -475,14 +102,25 @@ export default function App() {
   const currentYear = new Date().getFullYear();
 
   const pageTitle = useMemo(() => {
+    if (location.pathname.startsWith("/mission-control")) return "Mission Control";
+    if (location.pathname.startsWith("/workspace/my-projects")) return "工作台 / 我的项目";
+    if (location.pathname.startsWith("/workspace/todo-alerts")) return "工作台 / 待办与风险预警";
+    if (location.pathname.startsWith("/workspace/milestone-calendar")) return "工作台 / 里程碑日历";
+    if (location.pathname.startsWith("/process/start")) return "启动过程";
+    if (location.pathname.startsWith("/process/plan")) return "规划过程";
+    if (location.pathname.startsWith("/process/execute")) return "执行过程";
+    if (location.pathname.startsWith("/process/monitor/reports")) return "监控过程 / 周报月报";
+    if (location.pathname.startsWith("/process/monitor")) return "监控过程";
+    if (location.pathname.startsWith("/process/close")) return "收尾过程";
+    if (location.pathname.startsWith("/planning-studio")) return "计划编排工作台";
     if (location.pathname.startsWith("/dashboard")) return "项目总览";
     if (location.pathname.startsWith("/kanban")) return "任务看板";
     if (location.pathname.startsWith("/burndown")) return "燃尽图";
     if (location.pathname.startsWith("/gantt")) return "甘特图";
     if (location.pathname.startsWith("/import")) return "导入与同步";
-    if (location.pathname.startsWith("/access")) return "成员权限";
     if (location.pathname.startsWith("/org")) return "组织机构维护";
     if (location.pathname.startsWith("/dict")) return "字典表维护";
+    if (location.pathname.startsWith("/user-mgmt")) return "用户管理";
     if (location.pathname.startsWith("/system-entities")) return "系统实体管理";
     return activeModule.label;
   }, [location.pathname, activeModule.label]);
@@ -490,10 +128,18 @@ export default function App() {
     location.pathname.startsWith("/kanban") ||
     location.pathname.startsWith("/burndown") ||
     location.pathname.startsWith("/gantt");
+  const isProjectSpacePage =
+    location.pathname.startsWith("/mission-control") ||
+    location.pathname.startsWith("/planning-studio") ||
+    location.pathname.startsWith("/process/") ||
+    (location.pathname.startsWith("/module/") && !location.pathname.startsWith("/module/projects")) ||
+    location.pathname.startsWith("/kanban") ||
+    location.pathname.startsWith("/burndown") ||
+    location.pathname.startsWith("/gantt");
   const needsProjectToolbar =
     isChartPage ||
     location.pathname.startsWith("/dashboard") ||
-    (location.pathname.startsWith("/module/") && !location.pathname.startsWith("/module/projects"));
+    isProjectSpacePage;
 
   const departmentOptions = useMemo(() => {
     const names: string[] = [];
@@ -515,7 +161,10 @@ export default function App() {
   const loadProjects = async () => {
     const list = (await api.list("projects")) as ProjectOption[];
     setProjects(list);
-    if (!selectedProjectId && list[0]?.id) setSelectedProjectId(list[0].id);
+    setSelectedProjectId((prev) => {
+      if (list.some((item) => item.id === prev)) return prev;
+      return list[0]?.id ?? "";
+    });
   };
 
   const loadRows = async (moduleKey = activeModuleKey) => {
@@ -531,17 +180,6 @@ export default function App() {
       return;
     }
     setDashboard(await api.dashboard(selectedProjectId));
-  };
-
-  const loadMembers = async () => {
-    if (!selectedProjectId || (user?.role !== "ADMIN" && user?.role !== "PM")) {
-      setMembers([]);
-      return;
-    }
-    const [ms, us] = await Promise.all([api.projectMembers(selectedProjectId), api.users()]);
-    setMembers(ms);
-    setUsers(us.map((u) => ({ id: u.id, displayName: u.displayName, role: u.role })));
-    if (!memberForm.userId && us[0]?.id) setMemberForm((prev) => ({ ...prev, userId: us[0].id }));
   };
 
   const loadUserDirectory = async (role?: string) => {
@@ -606,7 +244,6 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     loadDashboard().catch((e) => message.error(getErrorMessage(e)));
-    loadMembers().catch((e) => message.error(getErrorMessage(e)));
   }, [selectedProjectId, user]);
 
   useEffect(() => {
@@ -615,6 +252,12 @@ export default function App() {
     loadSystemMeta(user.role).catch((e) => message.error(getErrorMessage(e)));
     loadSystemEntities(user.role, activeSystemEntityKey).catch((e) => message.error(getErrorMessage(e)));
   }, [user]);
+
+  useEffect(() => {
+    const queryProjectId = new URLSearchParams(location.search).get("projectId");
+    if (!queryProjectId) return;
+    setSelectedProjectId((prev) => (prev === queryProjectId ? prev : queryProjectId));
+  }, [location.search]);
 
   const createRecord = async (payload: Record<string, unknown>, moduleKey: string) => {
     const current = moduleMap.get(moduleKey) || modules[0];
@@ -635,7 +278,16 @@ export default function App() {
   const deleteRecord = async (moduleKey: string, id: string, projectId?: string) => {
     const current = moduleMap.get(moduleKey) || modules[0];
     await api.delete(current.endpoint, id, projectId);
-    if (current.endpoint === "projects") await loadProjects();
+    if (current.endpoint === "projects") {
+      await loadProjects();
+      await loadRows(moduleKey);
+      return;
+    }
+    await loadRows(moduleKey);
+    await loadDashboard();
+  };
+
+  const reloadModuleData = async (moduleKey: string) => {
     await loadRows(moduleKey);
     await loadDashboard();
   };
@@ -672,15 +324,75 @@ export default function App() {
     );
   }
 
-  const selectedMenuKey =
-    location.pathname.startsWith("/module/") ? location.pathname : location.pathname === "/" ? "/dashboard" : location.pathname;
+  const processBasePathByKey: Record<ProcessKey, string> = {
+    start: "/process/start",
+    plan: "/process/plan",
+    execute: "/process/execute",
+    monitor: "/process/monitor",
+    close: "/process/close"
+  };
+  const processIconByKey: Record<ProcessKey, JSX.Element> = {
+    start: <FlagOutlined />,
+    plan: <BarsOutlined />,
+    execute: <RocketOutlined />,
+    monitor: <LineChartOutlined />,
+    close: <ApartmentOutlined />
+  };
+  const processSubMenuItems = (Object.keys(PROCESS_NAVIGATION) as ProcessKey[]).map((processKey) => {
+    const section = PROCESS_NAVIGATION[processKey];
+    const processPath = processBasePathByKey[processKey];
+    return {
+      key: processPath,
+      icon: processIconByKey[processKey],
+      label: section.title.replace("过程", ""),
+      children: section.groups.flatMap((group) =>
+        group.items.map((item) => ({
+          key: `${processPath}::${item.key}`,
+          icon: <AppstoreOutlined />,
+          label: item.label,
+          routePath: item.path
+        }))
+      )
+    };
+  });
+  const processSubMenuKeyToPath = new Map<string, string>(
+    processSubMenuItems.flatMap((processItem) =>
+      (processItem.children ?? []).map((child) => [String(child.key), String((child as { routePath: string }).routePath)] as const)
+    )
+  );
+
+  const selectedMenuKey = (() => {
+    if (location.pathname.startsWith("/workspace/")) return location.pathname;
+    if (location.pathname.startsWith("/mission-control")) return "/mission-control";
+    const matchedProcessEntry = Array.from(processSubMenuKeyToPath.entries())
+      .filter(([, path]) => location.pathname === path || location.pathname.startsWith(`${path}/`))
+      .sort((a, b) => b[1].length - a[1].length)[0];
+    if (matchedProcessEntry) return matchedProcessEntry[0];
+    if (location.pathname.startsWith("/process/")) return resolveProcessMenuKey(location.pathname);
+    if (location.pathname.startsWith("/dashboard")) return "/mission-control";
+    return location.pathname === "/" ? "/mission-control" : location.pathname;
+  })();
 
   const menuItems = [
-    { key: "/dashboard", icon: <DashboardOutlined />, label: "项目总览" },
-    { key: "/kanban", icon: <ApartmentOutlined />, label: "任务看板" },
-    { key: "/burndown", icon: <LineChartOutlined />, label: "燃尽图" },
-    { key: "/gantt", icon: <BarsOutlined />, label: "甘特图" },
-    ...modules.map((m) => ({ key: `/module/${m.key}`, icon: <AppstoreOutlined />, label: m.label })),
+    {
+      key: "workspace",
+      icon: <HomeOutlined />,
+      label: "工作台",
+      children: [
+        { key: "/workspace/my-projects", icon: <AppstoreOutlined />, label: "我的项目" },
+        { key: "/workspace/todo-alerts", icon: <NotificationOutlined />, label: "待办/风险预警" },
+        { key: "/workspace/milestone-calendar", icon: <CalendarOutlined />, label: "里程碑日历" }
+      ]
+    },
+    {
+      key: "project-space",
+      icon: <CompassOutlined />,
+      label: "项目空间",
+      children: [
+        { key: "/mission-control", icon: <DashboardOutlined />, label: "Mission Control" },
+        ...processSubMenuItems
+      ]
+    },
     {
       key: "system",
       icon: <SettingOutlined />,
@@ -691,7 +403,7 @@ export default function App() {
           ? [
               { key: "/org", icon: <TeamOutlined />, label: "组织机构维护" },
               { key: "/dict", icon: <AppstoreOutlined />, label: "字典表维护" },
-              { key: "/access", icon: <SafetyCertificateOutlined />, label: "成员权限" },
+              { key: "/user-mgmt", icon: <TeamOutlined />, label: "用户管理" },
               { key: "/system-entities", icon: <SettingOutlined />, label: "系统实体管理" }
             ]
           : [])
@@ -703,19 +415,28 @@ export default function App() {
   const endDate = timeRange[1] ? timeRange[1].format("YYYY-MM-DD") : undefined;
 
   return (
-    <Layout style={{ minHeight: "100vh" }}>
-      <Sider width={260}>
+    <Layout style={{ height: "100vh", overflow: "hidden" }}>
+      <Sider width={260} style={{ height: "100vh", overflow: "auto" }}>
         <div style={{ color: "#fff", padding: 16, fontWeight: 700 }}>PMP 管理系统</div>
         <Menu
           theme="dark"
           mode="inline"
           selectedKeys={[selectedMenuKey]}
-          defaultOpenKeys={["system"]}
+          defaultOpenKeys={[
+            "workspace",
+            "project-space",
+            "system",
+            "/process/start",
+            "/process/plan",
+            "/process/execute",
+            "/process/monitor",
+            "/process/close"
+          ]}
           items={menuItems}
-          onClick={({ key }) => navigate(key)}
+          onClick={({ key }) => navigate(processSubMenuKeyToPath.get(String(key)) || String(key))}
         />
       </Sider>
-      <Layout>
+      <Layout style={{ minWidth: 0, overflow: "hidden" }}>
         <Header
           style={{
             background: "#1677ff",
@@ -741,7 +462,7 @@ export default function App() {
             退出登录
           </Button>
         </Header>
-        <Content style={{ padding: 16 }}>
+        <Content style={{ padding: 16, overflow: "auto" }}>
           {needsProjectToolbar ? (
             <Card style={{ marginBottom: 16 }}>
               <Space wrap>
@@ -766,7 +487,11 @@ export default function App() {
                       onChange={(value) => setStageFilter(value || "")}
                     />
                     <Typography.Text>时间范围</Typography.Text>
-                    <RangePicker value={timeRange} onChange={(value) => setTimeRange(value ?? [null, null])} />
+                    <RangePicker
+                      value={timeRange}
+                      placeholder={["开始日期", "结束日期"]}
+                      onChange={(value) => setTimeRange(value ?? [null, null])}
+                    />
                   </>
                 ) : null}
               </Space>
@@ -775,8 +500,52 @@ export default function App() {
 
           <Suspense fallback={<Card><Spin /></Card>}>
             <Routes>
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<ProjectDashboard dashboard={dashboard} />} />
+              <Route path="/" element={<Navigate to="/mission-control" replace />} />
+              <Route path="/workspace/my-projects" element={<WorkspacePanel mode="my-projects" projects={projects} dashboard={dashboard} />} />
+              <Route path="/workspace/todo-alerts" element={<WorkspacePanel mode="todo-alerts" projects={projects} dashboard={dashboard} />} />
+              <Route
+                path="/workspace/milestone-calendar"
+                element={<WorkspacePanel mode="milestone-calendar" projects={projects} dashboard={dashboard} />}
+              />
+              <Route
+                path="/mission-control"
+                element={
+                  <MissionControlPage
+                    role={user.role as "ADMIN" | "PM" | "MEMBER"}
+                    projectId={selectedProjectId}
+                    dashboard={dashboard}
+                    onNavigate={navigate}
+                  />
+                }
+              />
+              <Route
+                path="/planning-studio"
+                element={<PlanningStudio projectId={selectedProjectId} projects={projects} schemas={schemas} />}
+              />
+              <Route path="/module/wbs" element={<Navigate to="/planning-studio" replace />} />
+              <Route path="/module/milestones" element={<Navigate to="/planning-studio" replace />} />
+              <Route path="/process/start" element={<ProcessWorkspace processKey="start" projectId={selectedProjectId} onNavigate={navigate} />} />
+              <Route path="/process/plan" element={<ProcessWorkspace processKey="plan" projectId={selectedProjectId} onNavigate={navigate} />} />
+              <Route
+                path="/process/execute"
+                element={<ProcessWorkspace processKey="execute" projectId={selectedProjectId} onNavigate={navigate} />}
+              />
+              <Route
+                path="/process/monitor"
+                element={<ProcessWorkspace processKey="monitor" projectId={selectedProjectId} onNavigate={navigate} />}
+              />
+              <Route
+                path="/process/monitor/reports"
+                element={
+                  <ProjectReportEditor
+                    projectId={selectedProjectId}
+                    reportType={(new URLSearchParams(location.search).get("reportType") as "WEEKLY" | "MONTHLY" | null) || undefined}
+                    period={new URLSearchParams(location.search).get("period") || undefined}
+                  />
+                }
+              />
+              <Route path="/process/close" element={<ProcessWorkspace processKey="close" projectId={selectedProjectId} onNavigate={navigate} />} />
+              <Route path="/dashboard" element={<Navigate to="/mission-control" replace />} />
               <Route
                 path="/kanban"
                 element={<KanbanBoard projectId={selectedProjectId} stage={stageFilter || undefined} startDate={startDate} endDate={endDate} />}
@@ -789,19 +558,9 @@ export default function App() {
                 path="/gantt"
                 element={<GanttChart projectId={selectedProjectId} stage={stageFilter || undefined} startDate={startDate} endDate={endDate} />}
               />
-            <Route
-              path="/access"
-              element={
-                <ProjectMemberAccess
-                  visible={(user.role === "ADMIN" || user.role === "PM") && !!selectedProjectId}
-                  users={users}
-                  members={members}
-                  memberForm={memberForm}
-                  setMemberForm={setMemberForm}
-                  onSave={() => api.upsertProjectMember(selectedProjectId, memberForm).then(loadMembers).catch((e) => message.error(getErrorMessage(e)))}
-                />
-              }
-            />
+            <Route path="/legacy/dashboard" element={<Navigate to="/mission-control" replace />} />
+            <Route path="/legacy/wbs" element={<Navigate to="/planning-studio" replace />} />
+            <Route path="/legacy/milestones" element={<Navigate to="/planning-studio" replace />} />
             <Route
               path="/import"
               element={
@@ -866,6 +625,16 @@ export default function App() {
               }
             />
             <Route
+              path="/user-mgmt"
+              element={
+                <UserManager
+                  visible={user.role === "ADMIN" || user.role === "PM"}
+                  role={user.role as "ADMIN" | "PM" | "MEMBER"}
+                  orgTree={orgTree}
+                />
+              }
+            />
+            <Route
               path="/system-entities"
               element={
                 <SystemEntityManager
@@ -898,6 +667,7 @@ export default function App() {
                 <ModuleRoute
                   moduleMap={moduleMap}
                   schemas={schemas}
+                  projects={projects}
                   dictItems={dictItems}
                   departmentOptions={departmentOptions}
                   departmentTree={orgTree}
@@ -909,10 +679,16 @@ export default function App() {
                   onCreate={createRecord}
                   onUpdate={updateRecord}
                   onDelete={deleteRecord}
+                  onReload={reloadModuleData}
+                  canManageProjectMembers={user.role === "ADMIN" || user.role === "PM"}
+                  memberUserOptions={users}
                 />
               }
             />
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/legacy/kanban" element={<Navigate to="/kanban" replace />} />
+            <Route path="/legacy/burndown" element={<Navigate to="/burndown" replace />} />
+            <Route path="/legacy/gantt" element={<Navigate to="/planning-studio" replace />} />
+            <Route path="*" element={<Navigate to="/mission-control" replace />} />
             </Routes>
           </Suspense>
         </Content>
