@@ -11,6 +11,7 @@ interface Props {
   loading: boolean;
   onClose: () => void;
   onViewAll: (kpiKey: KpiKey) => void;
+  onOpenDetail: (row: Record<string, unknown>) => void;
 }
 
 function asText(value: unknown) {
@@ -18,17 +19,34 @@ function asText(value: unknown) {
   return String(value);
 }
 
-export function DrilldownDrawer({ open, kpiKey, rows, loading, onClose, onViewAll }: Props) {
+export function DrilldownDrawer({ open, kpiKey, rows, loading, onClose, onViewAll, onOpenDetail }: Props) {
   const config = kpiKey ? KPI_DRILLDOWN_CONFIG[kpiKey] : null;
   const columns = useMemo<ColumnsType<Record<string, unknown>>>(() => {
     if (!config) return [];
-    return config.summaryFields.map((field) => ({
+    const summaryColumns = config.summaryFields.map((field) => ({
       title: field,
       dataIndex: field,
       key: field,
       render: (value: unknown) => asText(value)
     }));
-  }, [config]);
+    return [
+      ...summaryColumns,
+      {
+        title: '操作',
+        key: 'actions',
+        width: 110,
+        fixed: 'right',
+        render: (_, row) =>
+          row.id ? (
+            <Button type="link" size="small" onClick={() => onOpenDetail(row)}>
+              查看详情
+            </Button>
+          ) : (
+            '-'
+          )
+      }
+    ];
+  }, [config, onOpenDetail]);
 
   return (
     <Drawer
@@ -57,6 +75,7 @@ export function DrilldownDrawer({ open, kpiKey, rows, loading, onClose, onViewAl
             columns={columns}
             dataSource={rows}
             pagination={false}
+            scroll={{ x: 'max-content' }}
             locale={{ emptyText: <Empty description="暂无可用明细" /> }}
             size="small"
           />

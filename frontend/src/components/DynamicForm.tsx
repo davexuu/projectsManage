@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import {
   Alert,
   Button,
   Cascader,
   Card,
   Checkbox,
+  Modal,
   Col,
   DatePicker,
   Form,
@@ -21,6 +23,8 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import { InfoCircleOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
+import { useNavigate } from "react-router-dom";
+import { ApiError } from "../api/client";
 import type { FormField, FormFieldOption } from "../types";
 import { parseFormError } from "../utils/errors";
 
@@ -41,7 +45,7 @@ interface Props {
   departmentCascaderOptions?: DepartmentCascaderOption[];
   departmentNamePathMap?: Map<string, string[]>;
   departmentIdNameMap?: Map<string, string>;
-  onSubmit: (payload: Record<string, unknown>) => Promise<void>;
+  onSubmit?: (payload: Record<string, unknown>) => Promise<void>;
   onBatchSubmit?: (payloads: Record<string, unknown>[]) => Promise<void>;
   onBatchValidate?: (payloads: Record<string, unknown>[]) => Promise<{
     ok: boolean;
@@ -49,12 +53,26 @@ interface Props {
   }>;
   onGenerateWbsSuggestions?: (
     prompt: string,
-    options?: { mode: SuggestionMode; targetStage: "启动" | "规划" | "执行" | "验收" }
+    options?: {
+      mode: SuggestionMode;
+      itemType: SuggestionItemType;
+      plannedStartDate: string;
+      plannedEndDate: string;
+    }
   ) => Promise<{
+    itemType?: SuggestionItemType;
     intent: string;
+    requirementSummary?: string;
+    todos?: Array<{
+      title: string;
+      workPackage: string;
+      stage: string;
+      detail: string;
+      deliverable: string;
+    }>;
     mode?: "light" | "standard" | "complete";
-    targetStage?: "启动" | "规划" | "执行" | "验收";
     reason: string;
+    wbsDrafts?: Record<string, unknown>[];
     items: Record<string, unknown>[];
   }>;
   predecessorOptions?: Array<{ label: string; value: string }>;
@@ -198,7 +216,31 @@ interface WbsNotice {
   lines: string[];
 }
 
+interface SuggestionTodoItem {
+  title: string;
+  workPackage: string;
+  stage: string;
+  detail: string;
+  deliverable: string;
+}
+
 type SuggestionMode = "light" | "standard" | "complete";
+type SuggestionItemType = "功能开发" | "数据处理" | "材料编写" | "会议协调" | "排查修复" | "其他事项";
+
+const suggestionItemTypeOptions: Array<{ label: string; value: SuggestionItemType }> = [
+  { label: "功能开发", value: "功能开发" },
+  { label: "数据处理", value: "数据处理" },
+  { label: "材料编写", value: "材料编写" },
+  { label: "会议协调", value: "会议协调" },
+  { label: "排查修复", value: "排查修复" },
+  { label: "其他事项", value: "其他事项" }
+];
+
+interface DraftDependencyDialogState {
+  open: boolean;
+  rowIndex: number;
+  refs: string[];
+}
 
 export function DynamicForm({
   fields,
@@ -218,6 +260,7 @@ export function DynamicForm({
   predecessorOptions,
   onCancel
 }: Props) {
+  const navigate = useNavigate();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [submitError, setSubmitError] = useState("");
@@ -233,12 +276,22 @@ export function DynamicForm({
   const [wbsNotice, setWbsNotice] = useState<WbsNotice | null>(null);
   const [quickPrompt, setQuickPrompt] = useState("");
   const [quickMode, setQuickMode] = useState<SuggestionMode>("standard");
+  const [quickItemType, setQuickItemType] = useState<SuggestionItemType>("功能开发");
+  const [quickDateRange, setQuickDateRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([dayjs(), dayjs().add(4, "day")]);
   const [quickGenerating, setQuickGenerating] = useState(false);
+  const [quickSummary, setQuickSummary] = useState("");
+  const [quickTodos, setQuickTodos] = useState<SuggestionTodoItem[]>([]);
   const [showManualEntry, setShowManualEntry] = useState(false);
+  const [dependencyDialog, setDependencyDialog] = useState<DraftDependencyDialogState>({
+    open: false,
+    rowIndex: -1,
+    refs: []
+  });
   const draftKeySeqRef = useRef(1);
 
   const isEditMode = Boolean(initialValues?.id);
   const isWbsBatchMode = moduleKey === "wbs" && !isEditMode && Boolean(onBatchSubmit);
+  const singleSubmitEnabled = !isWbsBatchMode && Boolean(onSubmit);
   const allFormValues = (Form.useWatch([], form) as Record<string, unknown>) ?? {};
 
   const draftValues = useMemo(() => {
@@ -270,6 +323,8 @@ export function DynamicForm({
     setWbsRowErrorMap({});
     setDraftRowErrorMap({});
     setWbsNotice(null);
+    setQuickSummary("");
+    setQuickTodos([]);
     setDraftSelectedKeys([]);
   }, [form, formInitialValues]);
 
@@ -337,6 +392,8 @@ export function DynamicForm({
     setWbsRowErrorMap({});
     setDraftRowErrorMap({});
     setWbsNotice(null);
+    setQuickSummary("");
+    setQuickTodos([]);
     if (enableDraft && draftStorageKey && !isEditMode) {
       localStorage.removeItem(draftStorageKey);
     }
@@ -731,6 +788,26 @@ export function DynamicForm({
       setWbsRows([]);
       setWbsEditingIndex(null);
     } catch (error) {
+      if (error instanceof ApiError && error.status === 409 && error.message.includes("存在未审批且影响里程碑/WBS的变更")) {
+        const changeCodeMatch = error.message.match(/（([^）]+)）/);
+        const changeCode = changeCodeMatch?.[1] || "未知编号";
+        Modal.error({
+          title: "当前无法提交分解项",
+          width: 620,
+          content: (
+            <Space direction="vertical" size={6}>
+              <Typography.Text>问题：检测到未审批且影响 WBS/里程碑基线的变更单（{changeCode}）。</Typography.Text>
+              <Typography.Text>影响：系统暂时禁止提交新的 WBS 基线修改。</Typography.Text>
+              <Typography.Text>怎么改：请先到“变更申请”完成审批或驳回，再返回当前页面重新提交。</Typography.Text>
+            </Space>
+          ),
+          okText: "我知道了",
+          cancelText: "去处理变更单",
+          okCancel: true,
+          onCancel: () => navigate("/module/changes")
+        });
+        return;
+      }
       const parsed = parseFormError(error);
       setSubmitError(parsed.message);
     } finally {
@@ -739,6 +816,7 @@ export function DynamicForm({
   };
 
   const handleFinishSingle = async (values: Record<string, unknown>) => {
+    if (!onSubmit || isWbsBatchMode) return;
     const payload = serializePayload(fields, values, departmentIdNameMap);
     try {
       setLoading(true);
@@ -760,6 +838,13 @@ export function DynamicForm({
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFormSubmitCapture = (event: FormEvent<HTMLFormElement>) => {
+    // 批量模式仅允许显式点击“批量提交”，阻止回车触发表单默认提交流程。
+    if (!isWbsBatchMode) return;
+    event.preventDefault();
+    event.stopPropagation();
   };
 
   const draftTableColumns = useMemo<ColumnsType<Record<string, unknown>>>(() => {
@@ -803,21 +888,45 @@ export function DynamicForm({
         ellipsis: true
       },
       {
-        title: "紧前任务",
+        title: "计划开始",
+        dataIndex: "plannedStartDate",
+        key: "plannedStartDate",
+        width: 120,
+        render: (value) => String(value || "-")
+      },
+      {
+        title: "计划完成",
+        dataIndex: "plannedEndDate",
+        key: "plannedEndDate",
+        width: 120,
+        render: (value) => String(value || "-")
+      },
+      {
+        title: "依赖编辑",
         key: "predecessors",
-        width: 280,
-        render: (_, row, index) => (
-          <Select
-            mode="multiple"
-            showSearch
-            allowClear
-            value={Array.isArray(row.__dependencyRefs) ? row.__dependencyRefs.map((item) => String(item)) : []}
-            options={draftDependencyOptions.filter((item) => item.value !== `draft:${row.__draftKey}`)}
-            optionFilterProp="label"
-            onChange={(value) => handleDraftDependencyChange(index, value as string[])}
-            placeholder="按任务名称选择紧前任务"
-          />
-        )
+        width: 220,
+        render: (_, row, index) => {
+          const refs = Array.isArray(row.__dependencyRefs) ? row.__dependencyRefs.map((item) => String(item)) : [];
+          return (
+            <Space direction="vertical" size={4}>
+              <Button
+                size="small"
+                onClick={() =>
+                  setDependencyDialog({
+                    open: true,
+                    rowIndex: index,
+                    refs
+                  })
+                }
+              >
+                编辑依赖
+              </Button>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                已选 {refs.length} 项
+              </Typography.Text>
+            </Space>
+          );
+        }
       },
       {
         title: "紧后任务",
@@ -826,7 +935,7 @@ export function DynamicForm({
         render: (_, row) => toDraftSuccessorText(row)
       }
     ];
-  }, [draftDependencyOptions, draftSelectedKeys, draftRows]);
+  }, [draftSelectedKeys, draftRows]);
 
   const wbsTableColumns = useMemo<ColumnsType<Record<string, unknown>>>(() => {
     const previewFields = [
@@ -942,16 +1051,37 @@ export function DynamicForm({
       setSubmitError("请先输入“我要做什么”后再生成建议");
       return;
     }
+    const plannedStartDate = quickDateRange[0]?.format("YYYY-MM-DD") ?? "";
+    const plannedEndDate = quickDateRange[1]?.format("YYYY-MM-DD") ?? "";
+    if (!plannedStartDate || !plannedEndDate) {
+      setSubmitError("请先选择计划开始时间和计划完成时间");
+      return;
+    }
+    if (dayjs(plannedEndDate).isBefore(dayjs(plannedStartDate), "day")) {
+      setSubmitError("计划完成时间不得早于计划开始时间");
+      return;
+    }
     try {
       setQuickGenerating(true);
       setSubmitError("");
-      const targetStage = String(form.getFieldValue("level1Stage") || "规划") as "启动" | "规划" | "执行" | "验收";
-      const response = await onGenerateWbsSuggestions(prompt, { mode: quickMode, targetStage });
-      const rows = Array.isArray(response.items) ? response.items : [];
+      const response = await onGenerateWbsSuggestions(prompt, {
+        mode: quickMode,
+        itemType: quickItemType,
+        plannedStartDate,
+        plannedEndDate
+      });
+      const rows =
+        Array.isArray(response.wbsDrafts) && response.wbsDrafts.length > 0
+          ? response.wbsDrafts
+          : Array.isArray(response.items)
+            ? response.items
+            : [];
       if (rows.length === 0) {
         setSubmitError("未生成可用建议，请补充更具体的描述");
         return;
       }
+      setQuickSummary(String(response.requirementSummary ?? "").trim());
+      setQuickTodos(Array.isArray(response.todos) ? response.todos : []);
       const draftPrepared = rows.map((row) => {
         const next = { ...row } as Record<string, unknown>;
         const draftKey = buildNextDraftKey();
@@ -969,7 +1099,14 @@ export function DynamicForm({
       setWbsNotice({
         type: "info",
         title: "建议已生成到草稿区，请确认后再加入分解列表",
-        lines: [`已生成 ${draftPrepared.length} 条建议（意图：${response.intent}）`, `规则说明：${response.reason}`]
+        lines: [
+          response.requirementSummary ? `需求摘要：${response.requirementSummary}` : `已识别需求意图：${response.intent}`,
+          `事项类型：${response.itemType ?? quickItemType}；计划窗口：${plannedStartDate} 至 ${plannedEndDate}`,
+          `已生成 ${draftPrepared.length} 条轻量 WBS 草稿`,
+          Array.isArray(response.todos) && response.todos.length > 0
+            ? `候选 to-do：${response.todos.map((item) => item.title).join("；")}`
+            : `规则说明：${response.reason}`
+        ]
       });
     } catch (error) {
       const parsed = parseFormError(error);
@@ -991,6 +1128,15 @@ export function DynamicForm({
         return next;
       })
     );
+  };
+
+  const handleSaveDraftDependencies = () => {
+    if (dependencyDialog.rowIndex < 0) {
+      setDependencyDialog({ open: false, rowIndex: -1, refs: [] });
+      return;
+    }
+    handleDraftDependencyChange(dependencyDialog.rowIndex, dependencyDialog.refs);
+    setDependencyDialog({ open: false, rowIndex: -1, refs: [] });
   };
 
   const handleAddSelectedDraftRows = () => {
@@ -1051,7 +1197,13 @@ export function DynamicForm({
   };
 
   return (
-    <Form layout="vertical" form={form} onFinish={handleFinishSingle} initialValues={formInitialValues}>
+    <Form
+      layout="vertical"
+      form={form}
+      onFinish={singleSubmitEnabled ? handleFinishSingle : undefined}
+      onSubmitCapture={handleFormSubmitCapture}
+      initialValues={formInitialValues}
+    >
       <h3>{title}</h3>
       {submitError ? <Alert type="error" message={submitError} showIcon style={{ marginBottom: 12 }} /> : null}
       {wbsNotice ? (
@@ -1097,10 +1249,15 @@ export function DynamicForm({
                 title="快速生成建议"
               >
                 <Space direction="vertical" style={{ width: "100%" }} size={8}>
-                  <Space wrap>
-                    <Typography.Text type="secondary">建议档位</Typography.Text>
+                  <Space wrap size={8}>
+                    <Select<SuggestionItemType>
+                      style={{ width: 140 }}
+                      value={quickItemType}
+                      onChange={setQuickItemType}
+                      options={suggestionItemTypeOptions}
+                    />
                     <Select<SuggestionMode>
-                      style={{ width: 180 }}
+                      style={{ width: 150 }}
                       value={quickMode}
                       onChange={setQuickMode}
                       options={[
@@ -1109,22 +1266,24 @@ export function DynamicForm({
                         { label: "完整（跨阶段）", value: "complete" }
                       ]}
                     />
-                    <Typography.Text type="secondary">当前阶段</Typography.Text>
-                    <Select
+                    <DatePicker
                       style={{ width: 140 }}
-                      value={(String(form.getFieldValue("level1Stage") || "规划") as "启动" | "规划" | "执行" | "验收")}
-                      onChange={(value) => form.setFieldValue("level1Stage", value)}
-                      options={[
-                        { label: "启动", value: "启动" },
-                        { label: "规划", value: "规划" },
-                        { label: "执行", value: "执行" },
-                        { label: "验收", value: "验收" }
-                      ]}
+                      value={quickDateRange[0]}
+                      format="YYYY-MM-DD"
+                      placeholder="开始时间"
+                      onChange={(value) => setQuickDateRange((prev) => [value, prev[1]])}
+                    />
+                    <DatePicker
+                      style={{ width: 140 }}
+                      value={quickDateRange[1]}
+                      format="YYYY-MM-DD"
+                      placeholder="完成时间"
+                      onChange={(value) => setQuickDateRange((prev) => [prev[0], value])}
                     />
                   </Space>
                   <Space.Compact style={{ width: "100%" }}>
                     <Input
-                      placeholder="一句话描述：例如 新增订单导出功能"
+                      placeholder="一句话描述事项：例如 梳理产品列表数据 / 编写汇报材料 / 新增订单导出功能"
                       value={quickPrompt}
                       onChange={(event) => setQuickPrompt(event.target.value)}
                     />
@@ -1132,6 +1291,14 @@ export function DynamicForm({
                       生成建议
                     </Button>
                   </Space.Compact>
+                  <Typography.Text type="secondary">
+                    {quickSummary || "先选事项类型、事项描述和计划时间，再生成可确认的轻量 WBS 草稿。"}
+                  </Typography.Text>
+                  {quickTodos.length > 0 ? (
+                    <Typography.Text type="secondary">
+                      候选 to-do：{quickTodos.map((item) => item.title).join("；")}
+                    </Typography.Text>
+                  ) : null}
                 </Space>
               </Card>
             ) : null}
@@ -1265,16 +1432,53 @@ export function DynamicForm({
           <Button type="primary" onClick={handleSubmitWbsBatch} loading={loading}>
             批量提交分解项（{wbsRows.length}）
           </Button>
-        ) : (
+        ) : singleSubmitEnabled ? (
           <Button type="primary" htmlType="submit" loading={loading}>
             {submitText}
           </Button>
-        )}
+        ) : null}
       </Space>
       {draftSaved ? <div style={{ marginTop: 8, color: "#52c41a", textAlign: "right" }}>草稿已暂存</div> : null}
       {visibleOptionalKeys.length > 0 && !showOptionalFields ? (
         <div style={{ marginTop: 8, color: "#667085", fontSize: 12, textAlign: "right" }}>已隐藏部分可选字段，可按需展开</div>
       ) : null}
+      <Modal
+        title={dependencyDialog.rowIndex >= 0 ? `编辑依赖 - 草稿第 ${dependencyDialog.rowIndex + 1} 行` : "编辑依赖"}
+        open={dependencyDialog.open}
+        onCancel={() => setDependencyDialog({ open: false, rowIndex: -1, refs: [] })}
+        onOk={handleSaveDraftDependencies}
+        okText="保存依赖"
+        cancelText="取消"
+        width={720}
+        destroyOnClose
+      >
+        <Space direction="vertical" style={{ width: "100%" }}>
+          <Typography.Text type="secondary">
+            请选择当前草稿任务的紧前任务；支持选择草稿内任务与已有任务。
+          </Typography.Text>
+          <Select
+            mode="multiple"
+            showSearch
+            allowClear
+            style={{ width: "100%" }}
+            value={dependencyDialog.refs}
+            options={draftDependencyOptions.filter((item) => {
+              const row = draftRows[dependencyDialog.rowIndex];
+              const key = String(row?.__draftKey ?? "");
+              return item.value !== `draft:${key}`;
+            })}
+            optionFilterProp="label"
+            onChange={(value) =>
+              setDependencyDialog((prev) => ({
+                ...prev,
+                refs: value as string[]
+              }))
+            }
+            placeholder="按任务名称搜索并选择紧前任务"
+          />
+          <Typography.Text type="secondary">已选择 {dependencyDialog.refs.length} 项依赖</Typography.Text>
+        </Space>
+      </Modal>
     </Form>
   );
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, Empty, Select, Space, Spin, Typography, message } from "antd";
-import Gantt, { GanttTask } from "frappe-gantt";
+import Gantt from "frappe-gantt";
+import type { GanttTask } from "frappe-gantt";
 import { api } from "../../api/client";
 import { getErrorMessage } from "../../utils/errors";
 
@@ -125,13 +126,7 @@ export function GanttChart({
         end: String(row.plannedEndDate).slice(0, 10),
         progress: statusToProgress(row.currentStatus),
         dependencies: dependencyIds.length > 0 ? dependencyIds.join(",") : undefined,
-        custom_class: [
-          taskClass(row.currentStatus, row.isCritical),
-          highlightTaskId && String(row.id) === highlightTaskId ? "gantt-task-highlight" : "",
-          conflictTaskIds?.includes(String(row.id)) ? "gantt-task-conflict" : ""
-        ]
-          .filter(Boolean)
-          .join(" ")
+        custom_class: taskClass(row.currentStatus, row.isCritical)
       };
     });
 
@@ -145,12 +140,7 @@ export function GanttChart({
         start: String(row.plannedFinishDate).slice(0, 10),
         end: String(row.plannedFinishDate).slice(0, 10),
         progress: statusToProgress(row.currentStatus),
-        custom_class: [
-          "gantt-milestone",
-          highlightMilestoneId && String(row.id) === highlightMilestoneId ? "gantt-task-highlight" : ""
-        ]
-          .filter(Boolean)
-          .join(" ")
+        custom_class: "gantt-milestone"
       }));
 
     return [...wbsTasks, ...milestoneTasks];
@@ -196,6 +186,23 @@ export function GanttChart({
         }
       }
     });
+
+    // frappe-gantt internally uses classList.add(custom_class) in refresh(),
+    // so custom_class cannot contain spaces. Add extra highlight/conflict classes safely here.
+    if (highlightTaskId) {
+      const node = wrapperRef.current.querySelector<SVGGElement>(`.bar-wrapper[data-id="${String(highlightTaskId)}"]`);
+      node?.classList.add("gantt-task-highlight");
+    }
+    if (highlightMilestoneId) {
+      const node = wrapperRef.current.querySelector<SVGGElement>(
+        `.bar-wrapper[data-id="ms-${String(highlightMilestoneId)}"]`
+      );
+      node?.classList.add("gantt-task-highlight");
+    }
+    for (const id of conflictTaskIds ?? []) {
+      const node = wrapperRef.current.querySelector<SVGGElement>(`.bar-wrapper[data-id="${String(id)}"]`);
+      node?.classList.add("gantt-task-conflict");
+    }
   }, [tasks, viewMode, rows, milestones, onSelect]);
 
   if (!projectId) {

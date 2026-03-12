@@ -60,13 +60,25 @@ export interface WbsTask extends BaseEntity {
 
 export type WbsQuickIntent = "新增" | "修复" | "优化" | "合规";
 export type WbsSuggestionMode = "light" | "standard" | "complete";
+export type WbsPlanningItemType = "功能开发" | "数据处理" | "材料编写" | "会议协调" | "排查修复" | "其他事项";
+
+export interface RequirementTodoItem {
+  title: string;
+  workPackage: string;
+  stage: Stage;
+  detail: string;
+  deliverable: string;
+}
 
 export interface WbsQuickSuggestionResult {
+  itemType: WbsPlanningItemType;
   intent: WbsQuickIntent;
   mode: WbsSuggestionMode;
-  targetStage: Stage;
   normalizedPrompt: string;
+  requirementSummary: string;
+  todos: RequirementTodoItem[];
   reason: string;
+  wbsDrafts: Array<Omit<WbsTask, "id" | "createdAt" | "updatedAt">>;
   items: Array<Omit<WbsTask, "id" | "createdAt" | "updatedAt">>;
 }
 

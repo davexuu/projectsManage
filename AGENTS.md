@@ -20,7 +20,7 @@ npm run test:api-regression  # Run API regression tests
 ### Backend Commands
 ```bash
 cd backend
-npm run dev              # Development (hot reload)
+npm run dev              # Development (tsx watch)
 npm run build            # Build TypeScript
 npm run start            # Start production server
 npm run prisma:generate  # Generate Prisma client
@@ -30,30 +30,25 @@ npm run prisma:migrate   # Run migrations
 ### Frontend Commands
 ```bash
 cd frontend
-npm run dev      # Development
+npm run dev      # Development (Vite)
 npm run build    # Build for production
 npm run preview  # Preview production build
 ```
 
 ### Running a Single Test
 
-No test framework configured. The `test:api-regression` script runs `node backend/scripts/api-regression.mjs`.
-
-To run a single API test, edit `backend/scripts/api-regression.mjs` and comment out other tests, or run directly:
+API regression tests run via `node backend/scripts/api-regression.mjs`. To run a single test:
 ```bash
+# Edit backend/scripts/api-regression.mjs and comment out other tests, then:
 node backend/scripts/api-regression.mjs
 ```
 
-### TypeCheck Commands
+### TypeCheck
 
-No separate linting tool (ESLint/Prettier) is configured. TypeScript provides type checking:
-
+No separate linting tool. TypeScript provides type checking:
 ```bash
-# Frontend typecheck (included in build)
-cd frontend && npm run build  # runs tsc --noEmit first
-
-# Backend typecheck
-cd backend && npm run build   # TypeScript compiles with strict mode
+cd frontend && npm run build  # includes tsc --noEmit
+cd backend && npm run build   # strict mode compilation
 ```
 
 ---
@@ -61,24 +56,18 @@ cd backend && npm run build   # TypeScript compiles with strict mode
 ## Code Style Guidelines
 
 ### TypeScript
-
 - **Backend**: `strict: true`, ES2022 target, NodeNext module
 - **Frontend**: `strict: true`, ES2020 target, ESNext modules
-- Always use explicit types; avoid `any`
+- Avoid `any` - use `unknown` and narrow types
 
 ### Imports
-
-**Backend** (ES Modules):
-- Use `.js` extensions: `import { foo } from "./foo.js"`
-- Use `@prisma/client` and `zod`
-
-**Frontend**: No extensions needed
+- **Backend** (ES Modules): Use `.js` extensions: `import { foo } from "./foo.js"`
+- **Frontend**: No extensions needed
 
 ### Formatting
-
-- Use 2 spaces for indentation
-- Use single quotes for strings
-- Use semicolons in JavaScript/TypeScript
+- 2 spaces indentation
+- Single quotes for strings
+- Semicolons in JavaScript/TypeScript
 
 ### Naming Conventions
 
@@ -110,7 +99,6 @@ router.post("/endpoint", ah(async (req, res) => {
 **Frontend**: Use `ApiError` from `api/client.ts` and utils in `utils/errors.ts`
 
 ### Project Structure
-
 ```
 backend/src/
 ├── modules/           # Route handlers (auth/, projects/, shared/)
@@ -127,25 +115,21 @@ frontend/src/
 ```
 
 ### Validation
-
 - Use **Zod** for all backend input validation
 - Define schemas in `services/validators.ts` or near routers
 
 ### API Design
-
 - RESTful: `/api/{resource}` or `/api/{resource}/{id}`
 - Query params for filtering: `?projectId=xxx&status=active`
 - Delete returns `{ ok: true }`, POST returns 201 with created resource
 - Use Chinese error messages
 
 ### Frontend Specific
-
 - Ant Design components + React Router
 - API via `api` object in `api/client.ts`
 - Token stored in `localStorage` as `pmp_token`
 
 ### What to Avoid
-
 - NO `any` - use `unknown` and narrow
 - NO `.env` commits
 - NO Chinese in code identifiers (variables, functions)

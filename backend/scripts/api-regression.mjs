@@ -150,13 +150,94 @@ async function main() {
       headers: authHeader(adminToken),
       body: JSON.stringify({
         projectId,
-        prompt: "新增支付功能"
+        itemType: "功能开发",
+        prompt: "新增支付功能",
+        plannedStartDate: "2026-03-01",
+        plannedEndDate: "2026-03-10"
       })
     });
     assertStatus(suggestionResp.status, 200, "规则拆解建议接口", suggestionResp.body);
-    if (!Array.isArray(suggestionResp.body?.items) || suggestionResp.body.items.length === 0) {
-      throw new Error("规则拆解建议未返回任务列表");
+    if (!suggestionResp.body?.requirementSummary || !Array.isArray(suggestionResp.body?.todos) || suggestionResp.body.todos.length === 0) {
+      throw new Error("规则拆解建议未返回需求摘要或 to-do 列表");
     }
+    if (!Array.isArray(suggestionResp.body?.wbsDrafts) || suggestionResp.body.wbsDrafts.length === 0) {
+      throw new Error("规则拆解建议未返回轻量 WBS 草稿");
+    }
+    const workPackages = suggestionResp.body.wbsDrafts.map((item) => item.level2WorkPackage);
+    if (!workPackages.includes("需求确认") || !workPackages.includes("方案设计") || !workPackages.includes("验证上线")) {
+      throw new Error(`规则拆解建议未返回基础骨架，实际工作包: ${JSON.stringify(workPackages)}`);
+    }
+
+    const structureSuggestionResp = await request("/wbs/quick-suggestions", {
+      method: "POST",
+      headers: authHeader(adminToken),
+      body: JSON.stringify({
+        projectId,
+        itemType: "功能开发",
+        prompt: "新增订单导出功能，需要调整导出日志表、后端接口和前端页面",
+        plannedStartDate: "2026-03-01",
+        plannedEndDate: "2026-03-12"
+      })
+    });
+    assertStatus(structureSuggestionResp.status, 200, "规则拆解条件补充接口", structureSuggestionResp.body);
+    const structurePackages = structureSuggestionResp.body?.wbsDrafts?.map((item) => item.level2WorkPackage) || [];
+    if (!structurePackages.includes("数据结构") || !structurePackages.includes("后端实现") || !structurePackages.includes("前端实现")) {
+      throw new Error(`规则拆解未按内容补充实现任务，实际工作包: ${JSON.stringify(structurePackages)}`);
+    }
+    const structureDates = structureSuggestionResp.body?.wbsDrafts?.map((item) => item.plannedStartDate) || [];
+    if (structureDates.some((value) => value < "2026-03-01" || value > "2026-03-12")) {
+      throw new Error(`规则拆解默认日期未落在计划窗口内: ${JSON.stringify(structureDates)}`);
+    }
+
+    const dataSuggestionResp = await request("/wbs/quick-suggestions", {
+      method: "POST",
+      headers: authHeader(adminToken),
+      body: JSON.stringify({
+        projectId,
+        itemType: "数据处理",
+        prompt: "梳理产品列表数据",
+        plannedStartDate: "2026-03-05",
+        plannedEndDate: "2026-03-09"
+      })
+    });
+    assertStatus(dataSuggestionResp.status, 200, "数据处理规则拆解接口", dataSuggestionResp.body);
+    const dataPackages = dataSuggestionResp.body?.wbsDrafts?.map((item) => item.level2WorkPackage) || [];
+    if (dataPackages.includes("后端实现") || dataPackages.includes("前端实现")) {
+      throw new Error(`数据处理事项不应默认生成前后端实现任务: ${JSON.stringify(dataPackages)}`);
+    }
+    if (!dataPackages.includes("口径确认") || !dataPackages.includes("数据整理")) {
+      throw new Error(`数据处理事项未生成预期工作包: ${JSON.stringify(dataPackages)}`);
+    }
+
+    const documentSuggestionResp = await request("/wbs/quick-suggestions", {
+      method: "POST",
+      headers: authHeader(adminToken),
+      body: JSON.stringify({
+        projectId,
+        itemType: "材料编写",
+        prompt: "编写项目汇报材料",
+        plannedStartDate: "2026-03-05",
+        plannedEndDate: "2026-03-11"
+      })
+    });
+    assertStatus(documentSuggestionResp.status, 200, "材料编写规则拆解接口", documentSuggestionResp.body);
+    const documentPackages = documentSuggestionResp.body?.wbsDrafts?.map((item) => item.level2WorkPackage) || [];
+    if (!documentPackages.includes("提纲确认") || !documentPackages.includes("初稿编写") || !documentPackages.includes("修改定稿")) {
+      throw new Error(`材料编写事项未生成预期工作包: ${JSON.stringify(documentPackages)}`);
+    }
+
+    const invalidSuggestionResp = await request("/wbs/quick-suggestions", {
+      method: "POST",
+      headers: authHeader(adminToken),
+      body: JSON.stringify({
+        projectId,
+        itemType: "功能开发",
+        prompt: "新增附件上传功能",
+        plannedStartDate: "2026-03-10",
+        plannedEndDate: "2026-03-01"
+      })
+    });
+    assertStatus(invalidSuggestionResp.status, 400, "规则拆解日期校验", invalidSuggestionResp.body);
 
     const validatePlanResp = await request("/wbs/validate-plan", {
       method: "POST",

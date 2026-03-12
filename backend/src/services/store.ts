@@ -8,14 +8,14 @@ import {
   ProjectReport,
   RiskItem,
   StatusAssessment,
-  Stage,
   TaskStatus,
-  WbsQuickIntent,
+  WbsPlanningItemType,
   WbsSuggestionMode,
   WbsQuickSuggestionResult,
   WbsTask
 } from "../domain/types.js";
 import { BusinessError } from "./errors.js";
+import { planRequirementToLightWbs } from "./requirementPlanner.js";
 import { RULE_CONFIG } from "./rules/config.js";
 
 export const prisma = new PrismaClient();
@@ -45,157 +45,6 @@ const STAGE_CODE_MAP: Record<WbsTask["level1Stage"], number> = {
   规划: 2,
   执行: 3,
   验收: 4
-};
-
-const INTENT_KEYWORDS: Array<{ intent: WbsQuickIntent; keywords: string[]; reason: string }> = [
-  { intent: "新增", keywords: ["新增", "开发", "上线", "建设", "实现"], reason: "命中功能建设关键词" },
-  { intent: "修复", keywords: ["修复", "排查", "故障", "问题", "缺陷", "bug"], reason: "命中缺陷治理关键词" },
-  { intent: "优化", keywords: ["优化", "重构", "提效", "性能", "改造"], reason: "命中优化改造关键词" },
-  { intent: "合规", keywords: ["合规", "审计", "制度", "规范", "监管"], reason: "命中合规治理关键词" }
-];
-
-interface SuggestionTemplate {
-  stage: WbsTask["level1Stage"];
-  workPackage: string;
-  taskNameTemplate: string;
-  taskDetailTemplate: string;
-  deliverableTemplate: string;
-  isCritical?: WbsTask["isCritical"];
-}
-
-const SUGGESTION_TEMPLATES: Record<WbsQuickIntent, SuggestionTemplate[]> = {
-  新增: [
-    {
-      stage: "规划",
-      workPackage: "需求分析",
-      taskNameTemplate: "完成{{topic}}需求澄清与评审",
-      taskDetailTemplate: "明确{{topic}}范围、边界、验收标准并完成评审结论归档",
-      deliverableTemplate: "{{topic}}需求文档、评审纪要",
-      isCritical: "是"
-    },
-    {
-      stage: "规划",
-      workPackage: "方案设计",
-      taskNameTemplate: "完成{{topic}}技术方案设计",
-      taskDetailTemplate: "输出{{topic}}架构设计、接口定义与风险分析",
-      deliverableTemplate: "{{topic}}设计文档"
-    },
-    {
-      stage: "执行",
-      workPackage: "开发实现",
-      taskNameTemplate: "完成{{topic}}功能开发与单测",
-      taskDetailTemplate: "完成核心代码实现并通过关键路径单元测试",
-      deliverableTemplate: "代码提交记录、单测报告",
-      isCritical: "是"
-    },
-    {
-      stage: "执行",
-      workPackage: "联调测试",
-      taskNameTemplate: "完成{{topic}}联调与回归测试",
-      taskDetailTemplate: "覆盖主流程、异常流程和边界条件并关闭阻断缺陷",
-      deliverableTemplate: "联调记录、测试报告"
-    },
-    {
-      stage: "验收",
-      workPackage: "上线验收",
-      taskNameTemplate: "完成{{topic}}上线验证与交接",
-      taskDetailTemplate: "完成上线检查、效果验证和运维交接",
-      deliverableTemplate: "上线记录、验收确认单"
-    }
-  ],
-  修复: [
-    {
-      stage: "规划",
-      workPackage: "问题分析",
-      taskNameTemplate: "确认{{topic}}问题范围与影响面",
-      taskDetailTemplate: "定位问题根因并确认影响场景与优先级",
-      deliverableTemplate: "问题分析报告",
-      isCritical: "是"
-    },
-    {
-      stage: "执行",
-      workPackage: "缺陷修复",
-      taskNameTemplate: "完成{{topic}}修复开发",
-      taskDetailTemplate: "实现修复方案并完成代码审查",
-      deliverableTemplate: "修复提交记录"
-    },
-    {
-      stage: "执行",
-      workPackage: "回归验证",
-      taskNameTemplate: "完成{{topic}}回归验证",
-      taskDetailTemplate: "验证修复有效且未引入新问题",
-      deliverableTemplate: "回归测试报告"
-    },
-    {
-      stage: "验收",
-      workPackage: "复盘沉淀",
-      taskNameTemplate: "完成{{topic}}问题复盘",
-      taskDetailTemplate: "沉淀根因、改进项与预防措施",
-      deliverableTemplate: "复盘纪要"
-    }
-  ],
-  优化: [
-    {
-      stage: "规划",
-      workPackage: "现状评估",
-      taskNameTemplate: "完成{{topic}}现状评估",
-      taskDetailTemplate: "建立当前指标基线并识别优化机会",
-      deliverableTemplate: "评估报告"
-    },
-    {
-      stage: "规划",
-      workPackage: "优化设计",
-      taskNameTemplate: "完成{{topic}}优化方案评审",
-      taskDetailTemplate: "输出可实施优化方案并确认实施路径",
-      deliverableTemplate: "优化方案文档"
-    },
-    {
-      stage: "执行",
-      workPackage: "优化实施",
-      taskNameTemplate: "完成{{topic}}优化改造",
-      taskDetailTemplate: "按方案实施并保证业务连续性",
-      deliverableTemplate: "改造记录"
-    },
-    {
-      stage: "验收",
-      workPackage: "效果验证",
-      taskNameTemplate: "完成{{topic}}效果验证",
-      taskDetailTemplate: "对比优化前后指标并输出结论",
-      deliverableTemplate: "效果评估报告"
-    }
-  ],
-  合规: [
-    {
-      stage: "规划",
-      workPackage: "条款解读",
-      taskNameTemplate: "完成{{topic}}合规条款解读",
-      taskDetailTemplate: "梳理监管要求并映射到业务流程",
-      deliverableTemplate: "合规条款映射表",
-      isCritical: "是"
-    },
-    {
-      stage: "规划",
-      workPackage: "差距分析",
-      taskNameTemplate: "完成{{topic}}差距分析",
-      taskDetailTemplate: "识别当前状态与目标要求差距并制定整改计划",
-      deliverableTemplate: "差距分析报告"
-    },
-    {
-      stage: "执行",
-      workPackage: "整改实施",
-      taskNameTemplate: "完成{{topic}}整改实施",
-      taskDetailTemplate: "落实整改动作并留存过程证据",
-      deliverableTemplate: "整改记录、证据清单",
-      isCritical: "是"
-    },
-    {
-      stage: "验收",
-      workPackage: "审计确认",
-      taskNameTemplate: "完成{{topic}}合规验收",
-      taskDetailTemplate: "完成内部验收并输出审计确认结论",
-      deliverableTemplate: "验收报告、审计确认单"
-    }
-  ]
 };
 
 interface WbsPlanConflict {
@@ -485,83 +334,6 @@ export class PrismaStore {
     await this.assertWbsMilestoneValid(projectId, input.milestoneId);
     await this.assertWbsPredecessorsExist(projectId, input.predecessorTaskIds ?? [], currentTaskId);
     await this.assertWbsDependencyDateRule(projectId, input);
-  }
-
-  private resolveQuickIntent(prompt: string): { intent: WbsQuickIntent; reason: string } {
-    const normalized = prompt.trim().toLowerCase();
-    for (const item of INTENT_KEYWORDS) {
-      if (item.keywords.some((keyword) => normalized.includes(keyword.toLowerCase()))) {
-        return { intent: item.intent, reason: item.reason };
-      }
-    }
-    return { intent: "新增", reason: "未命中关键词，使用默认新增模板" };
-  }
-
-  private formatTemplateText(template: string, topic: string) {
-    return template.replace(/\{\{topic\}\}/g, topic);
-  }
-
-  private buildQuickSuggestionRows(
-    intent: WbsQuickIntent,
-    prompt: string,
-    projectOwner: string | undefined,
-    mode: WbsSuggestionMode,
-    targetStage: Stage
-  ): Array<Omit<WbsTask, "id" | "createdAt" | "updatedAt">> {
-    const owner = (projectOwner || "").trim() || "待分配";
-    const today = new Date();
-    const templates = this.pickSuggestionTemplates(intent, mode, targetStage);
-    return templates.map((template, index) => {
-      const start = new Date(today);
-      start.setDate(today.getDate() + index * 3);
-      const end = new Date(start);
-      end.setDate(start.getDate() + 2);
-      const format = (date: Date) => date.toISOString().slice(0, 10);
-      return {
-        projectId: "",
-        level1Stage: template.stage,
-        level2WorkPackage: template.workPackage,
-        taskName: this.formatTemplateText(template.taskNameTemplate, prompt),
-        taskDetail: this.formatTemplateText(template.taskDetailTemplate, prompt),
-        deliverable: this.formatTemplateText(template.deliverableTemplate, prompt),
-        taskOwner: owner,
-        plannedStartDate: format(start),
-        plannedEndDate: format(end),
-        currentStatus: "未开始",
-        isCritical: template.isCritical ?? "否",
-        predecessorTaskIds: []
-      };
-    });
-  }
-
-  private pickSuggestionTemplates(
-    intent: WbsQuickIntent,
-    mode: WbsSuggestionMode,
-    targetStage: Stage
-  ): SuggestionTemplate[] {
-    const templates = SUGGESTION_TEMPLATES[intent] ?? SUGGESTION_TEMPLATES.新增;
-    if (mode === "complete") return templates;
-    const stageTemplates = templates.filter((item) => item.stage === targetStage);
-    const fallbackTemplates = templates.filter((item) => item.stage !== targetStage);
-    if (mode === "light") {
-      return [...stageTemplates, ...fallbackTemplates].slice(0, 2);
-    }
-    const standard = [...stageTemplates, ...fallbackTemplates].slice(0, 4);
-    return standard.length >= 2 ? standard : [...templates].slice(0, 2);
-  }
-
-  private buildSuggestionReason(
-    mode: WbsSuggestionMode,
-    targetStage: Stage,
-    intentReason: string,
-    items: Array<Omit<WbsTask, "id" | "createdAt" | "updatedAt">>
-  ) {
-    const modeText =
-      mode === "light" ? "轻量档（优先生成 1-2 条）" : mode === "complete" ? "完整档（可跨阶段展开）" : "标准档（按当前阶段生成）";
-    const stageCount = items.filter((item) => item.level1Stage === targetStage).length;
-    const fallbackUsed = stageCount < items.length && mode !== "complete";
-    const fallbackText = fallbackUsed ? "；当前阶段模板不足，已补充邻近阶段建议" : "";
-    return `${modeText}，目标阶段：${targetStage}；${intentReason}${fallbackText}`;
   }
 
   private buildSortOrderByCode(code?: string, fallback?: number) {
@@ -1049,9 +821,11 @@ export class PrismaStore {
 
   async generateQuickWbsSuggestions(input: {
     projectId: string;
+    itemType: WbsPlanningItemType;
     prompt: string;
+    plannedStartDate: string;
+    plannedEndDate: string;
     mode?: WbsSuggestionMode;
-    targetStage?: Stage;
   }): Promise<WbsQuickSuggestionResult> {
     const project = await prisma.project.findUnique({
       where: { id: input.projectId },
@@ -1060,21 +834,19 @@ export class PrismaStore {
     if (!project) {
       throw new BusinessError("项目不存在", 404);
     }
-    const normalizedPrompt = input.prompt.trim();
-    const mode = input.mode ?? "standard";
-    const targetStage = input.targetStage ?? "规划";
-    const { intent, reason } = this.resolveQuickIntent(normalizedPrompt);
-    const rows = this.buildQuickSuggestionRows(intent, normalizedPrompt, project.projectOwner, mode, targetStage).map((item) => ({
-      ...item,
-      projectId: input.projectId
-    }));
-    const withCodes = await this.assignAutoWbsCodes(input.projectId, rows);
+    const planned = planRequirementToLightWbs({
+      projectId: input.projectId,
+      itemType: input.itemType,
+      prompt: input.prompt,
+      plannedStartDate: input.plannedStartDate,
+      plannedEndDate: input.plannedEndDate,
+      projectOwner: project.projectOwner ?? undefined,
+      mode: input.mode
+    });
+    const withCodes = await this.assignAutoWbsCodes(input.projectId, planned.wbsDrafts);
     return {
-      intent,
-      mode,
-      targetStage,
-      normalizedPrompt,
-      reason: this.buildSuggestionReason(mode, targetStage, reason, withCodes),
+      ...planned,
+      wbsDrafts: withCodes,
       items: withCodes
     };
   }

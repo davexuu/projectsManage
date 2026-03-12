@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Navigate, useLocation, useParams } from "react-router-dom";
-import { Button, Card, Cascader, Modal, Popconfirm, Select, Space, Tag, Upload, message } from "antd";
+import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Button, Card, Cascader, Descriptions, Empty, Modal, Popconfirm, Select, Space, Tag, Upload, message } from "antd";
 import { api, ProjectAttachmentItem } from "../../api/client";
 import type { UploadProps } from "antd";
 import { AppTable } from "../../components/AppTable";
 import { DynamicForm } from "../../components/DynamicForm";
 import { EntityTable } from "../../components/EntityTable";
 import { moduleFeatureFlags } from "./featureFlags";
+import { normalizeModuleKey } from "./route-utils";
 import type { DictionaryItem } from "../system/DictionaryManager";
 import type { OrganizationNode } from "../system/OrganizationManager";
 import { FieldType, FormField, FormSchemaMap, ModuleConfig } from "../../types";
@@ -43,6 +44,19 @@ function splitUserValues(value: unknown) {
 
 function asString(value: string | string[] | undefined) {
   return typeof value === "string" ? value : "";
+}
+
+function toDisplayText(value: unknown) {
+  if (value === null || value === undefined || value === "") return "-";
+  if (Array.isArray(value)) return value.map((item) => String(item)).join("、");
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
 }
 
 interface DepartmentCascaderOption {
@@ -142,7 +156,14 @@ export function ModuleRoute({
 }: Props) {
   const params = useParams();
   const location = useLocation();
-  const moduleKey = params.moduleKey || "projects";
+  const navigate = useNavigate();
+  const rawModuleKey = params.moduleKey || "projects";
+  const rawRecordId = String(params.recordId ?? "").trim();
+  const moduleKey = normalizeModuleKey(rawModuleKey);
+  if (!moduleKey) return <Navigate to="/module/projects" replace />;
+  if (moduleKey !== rawModuleKey) {
+    return <Navigate to={`/module/${moduleKey}${rawRecordId ? `/${encodeURIComponent(rawRecordId)}` : ""}${location.search}`} replace />;
+  }
   const module = moduleMap.get(moduleKey);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<Record<string, unknown> | null>(null);
@@ -188,6 +209,8 @@ export function ModuleRoute({
   if (!module) return <Navigate to="/module/projects" replace />;
 
   const fields = schemas[module.key] ?? [];
+  const recordId = rawRecordId;
+  const isDetailMode = Boolean(recordId);
   const searchFieldConfigs = moduleSearchFields[module.key] ?? [];
   const needProject = module.endpoint !== "projects";
   const initialValues = {
@@ -257,6 +280,31 @@ export function ModuleRoute({
       })
     );
   }, [rows, searchFieldConfigs, searchValues, departmentPath, departmentLookup, location.search, module.key]);
+
+  const detailRow = useMemo(() => {
+    if (!recordId) return null;
+    return (
+      filteredRows.find((row) => String(row.id ?? "") === recordId) ||
+      rows.find((row) => String(row.id ?? "") === recordId) ||
+      null
+    );
+  }, [filteredRows, recordId, rows]);
+
+  const detailItems = useMemo(() => {
+    if (!detailRow) return [];
+    const fieldKeySet = new Set(fields.map((field) => field.key));
+    const orderedKeys = [
+      ...fields.map((field) => field.key),
+      ...Object.keys(detailRow).filter((key) => key !== "id" && !fieldKeySet.has(key))
+    ];
+    return orderedKeys
+      .filter((key) => key !== "id" && key in detailRow)
+      .map((key) => ({
+        key,
+        label: columnLabels[key] ?? key,
+        value: toDisplayText(detailRow[key])
+      }));
+  }, [detailRow, fields, columnLabels]);
 
   const searchableOptions = useMemo(() => {
     const out: Record<string, string[]> = {};
@@ -484,123 +532,168 @@ export function ModuleRoute({
   return (
     <>
       {needProject && !selectedProjectId ? <Card style={{ marginBottom: 16 }}>请选择项目后再录入该模块。</Card> : null}
-
-      {searchFieldConfigs.length > 0 ? (
-        <Card title="筛选" style={{ marginBottom: 16 }}>
-          <Space wrap>
-            {searchFieldConfigs.map((config) =>
-              config.mode === "select" ? (
-                config.key === "leadDepartment" ? (
-                  <Cascader
-                    key={config.key}
-                    style={{ width: 220 }}
-                    placeholder={columnLabels[config.key] ?? config.key}
-                    allowClear
-                    showSearch
-                    changeOnSelect
-                    value={departmentPath.length > 0 ? departmentPath : undefined}
-                    options={departmentCascaderOptions}
-                    onChange={(value) => setDepartmentPath((value as string[]) ?? [])}
-                  />
-                ) : (
-                  <Select
-                    key={config.key}
-                    style={{ width: 220 }}
-                    placeholder={columnLabels[config.key] ?? config.key}
-                    allowClear
-                    value={asString(searchValues[config.key]) || undefined}
-                    options={(searchableOptions[config.key] ?? []).map((opt) => ({ label: opt, value: opt }))}
-                    onChange={(value) => setSearchValues((prev) => ({ ...prev, [config.key]: value || "" }))}
-                  />
-                )
-              ) : config.mode === "multi-user" ? (
-                <Select
-                  key={config.key}
-                  mode="multiple"
-                  showSearch
-                  allowClear
-                  style={{ width: 320 }}
-                  placeholder={`请选择${columnLabels[config.key] ?? config.key}`}
-                  value={Array.isArray(searchValues[config.key]) ? searchValues[config.key] : []}
-                  options={(searchableOptions[config.key] ?? []).map((opt) => ({ label: opt, value: opt }))}
-                  optionFilterProp="label"
-                  filterOption={(input, option) => String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
-                  onChange={(value) => setSearchValues((prev) => ({ ...prev, [config.key]: value ?? [] }))}
-                />
-              ) : config.mode === "user" ? (
-                <Select
-                  key={config.key}
-                  showSearch
-                  allowClear
-                  style={{ width: 220 }}
-                  placeholder={`请输入${columnLabels[config.key] ?? config.key}`}
-                  value={asString(searchValues[config.key]) || undefined}
-                  options={(searchableOptions[config.key] ?? []).map((opt) => ({ label: opt, value: opt }))}
-                  optionFilterProp="label"
-                  filterOption={(input, option) => String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
-                  onChange={(value) => setSearchValues((prev) => ({ ...prev, [config.key]: value || "" }))}
-                />
-              ) : (
-                <Select
-                  key={config.key}
-                  showSearch
-                  allowClear
-                  style={{ width: 220 }}
-                  placeholder={`请输入${columnLabels[config.key] ?? config.key}`}
-                  value={asString(searchValues[config.key]) || undefined}
-                  options={(searchableOptions[config.key] ?? []).map((opt) => ({ label: opt, value: opt }))}
-                  onChange={(value) => setSearchValues((prev) => ({ ...prev, [config.key]: value || "" }))}
-                />
-              )
-            )}
-          </Space>
+      {isDetailMode ? (
+        <Card
+          title={`${module.label}详情`}
+          extra={
+            <Space>
+              <Button onClick={() => navigate(`/module/${moduleKey}${location.search}`)}>返回列表</Button>
+              {detailRow && moduleFields.length > 0 ? (
+                <Button
+                  type="primary"
+                  onClick={() => {
+                    setEditingRow(detailRow);
+                    setDialogOpen(true);
+                  }}
+                >
+                  编辑
+                </Button>
+              ) : null}
+            </Space>
+          }
+        >
+          {detailRow ? (
+            <Descriptions bordered size="small" column={{ xs: 1, sm: 1, md: 2, lg: 2, xl: 3 }}>
+              <Descriptions.Item label={columnLabels.id ?? "id"}>{toDisplayText(detailRow.id)}</Descriptions.Item>
+              {detailItems.map((item) => (
+                <Descriptions.Item key={item.key} label={item.label}>
+                  {item.value}
+                </Descriptions.Item>
+              ))}
+            </Descriptions>
+          ) : (
+            <Empty description="未找到该实例，可能已删除或不在当前筛选条件下。">
+              <Button type="primary" onClick={() => navigate(`/module/${moduleKey}${location.search}`)}>
+                返回列表
+              </Button>
+            </Empty>
+          )}
         </Card>
-      ) : null}
+      ) : (
+        <>
+          {searchFieldConfigs.length > 0 ? (
+            <Card title="筛选" style={{ marginBottom: 16 }}>
+              <Space wrap>
+                {searchFieldConfigs.map((config) =>
+                  config.mode === "select" ? (
+                    config.key === "leadDepartment" ? (
+                      <Cascader
+                        key={config.key}
+                        style={{ width: 220 }}
+                        placeholder={columnLabels[config.key] ?? config.key}
+                        allowClear
+                        showSearch
+                        changeOnSelect
+                        value={departmentPath.length > 0 ? departmentPath : undefined}
+                        options={departmentCascaderOptions}
+                        onChange={(value) => setDepartmentPath((value as string[]) ?? [])}
+                      />
+                    ) : (
+                      <Select
+                        key={config.key}
+                        style={{ width: 220 }}
+                        placeholder={columnLabels[config.key] ?? config.key}
+                        allowClear
+                        value={asString(searchValues[config.key]) || undefined}
+                        options={(searchableOptions[config.key] ?? []).map((opt) => ({ label: opt, value: opt }))}
+                        onChange={(value) => setSearchValues((prev) => ({ ...prev, [config.key]: value || "" }))}
+                      />
+                    )
+                  ) : config.mode === "multi-user" ? (
+                    <Select
+                      key={config.key}
+                      mode="multiple"
+                      showSearch
+                      allowClear
+                      style={{ width: 320 }}
+                      placeholder={`请选择${columnLabels[config.key] ?? config.key}`}
+                      value={Array.isArray(searchValues[config.key]) ? searchValues[config.key] : []}
+                      options={(searchableOptions[config.key] ?? []).map((opt) => ({ label: opt, value: opt }))}
+                      optionFilterProp="label"
+                      filterOption={(input, option) => String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
+                      onChange={(value) => setSearchValues((prev) => ({ ...prev, [config.key]: value ?? [] }))}
+                    />
+                  ) : config.mode === "user" ? (
+                    <Select
+                      key={config.key}
+                      showSearch
+                      allowClear
+                      style={{ width: 220 }}
+                      placeholder={`请输入${columnLabels[config.key] ?? config.key}`}
+                      value={asString(searchValues[config.key]) || undefined}
+                      options={(searchableOptions[config.key] ?? []).map((opt) => ({ label: opt, value: opt }))}
+                      optionFilterProp="label"
+                      filterOption={(input, option) => String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
+                      onChange={(value) => setSearchValues((prev) => ({ ...prev, [config.key]: value || "" }))}
+                    />
+                  ) : (
+                    <Select
+                      key={config.key}
+                      showSearch
+                      allowClear
+                      style={{ width: 220 }}
+                      placeholder={`请输入${columnLabels[config.key] ?? config.key}`}
+                      value={asString(searchValues[config.key]) || undefined}
+                      options={(searchableOptions[config.key] ?? []).map((opt) => ({ label: opt, value: opt }))}
+                      onChange={(value) => setSearchValues((prev) => ({ ...prev, [config.key]: value || "" }))}
+                    />
+                  )
+                )}
+              </Space>
+            </Card>
+          ) : null}
 
-      {moduleFields.length > 0 ? (
-        <Card style={{ marginBottom: 16 }}>
-          <Button
-            type="primary"
-            disabled={needProject && !selectedProjectId}
-            onClick={() => {
-              setEditingRow(null);
-              setDialogOpen(true);
+          {moduleFields.length > 0 ? (
+            <Card style={{ marginBottom: 16 }}>
+              <Button
+                type="primary"
+                disabled={needProject && !selectedProjectId}
+                onClick={() => {
+                  setEditingRow(null);
+                  setDialogOpen(true);
+                }}
+              >
+                新增记录
+              </Button>
+            </Card>
+          ) : null}
+
+          <EntityTable
+            title={`${module.label}列表`}
+            rows={filteredRows}
+            columnLabels={columnLabels}
+            tableVariant={moduleFeatureFlags.elementLikeTableTheme && module.key === "wbs" ? "element-like" : "default"}
+            onView={(row) => {
+              const rowId = String(row.id ?? "").trim();
+              if (!rowId) return;
+              navigate(`/module/${moduleKey}/${encodeURIComponent(rowId)}${location.search}`);
             }}
-          >
-            新增记录
-          </Button>
-        </Card>
-      ) : null}
-
-      <EntityTable
-        title={`${module.label}列表`}
-        rows={filteredRows}
-        columnLabels={columnLabels}
-        tableVariant={moduleFeatureFlags.elementLikeTableTheme && module.key === "wbs" ? "element-like" : "default"}
-        onEdit={moduleFields.length > 0 ? (row) => { setEditingRow(row); setDialogOpen(true); } : undefined}
-        onDelete={moduleFields.length > 0 ? handleDeleteOne : undefined}
-        onBatchDelete={moduleFields.length > 0 ? handleBatchDelete : undefined}
-        extraRowActions={
-          module.key === "projects" && canManageProjectMembers
-            ? (row) => (
-                <>
-                  <Button type="link" size="small" onClick={() => openAttachmentModal(row)}>
-                    启动附件
-                  </Button>
-                  <Button type="link" size="small" onClick={() => openMemberModal(row)}>
-                    成员权限
-                  </Button>
-                </>
-              )
-            : module.key === "projects"
-              ? (row) => (
-                  <Button type="link" size="small" onClick={() => openAttachmentModal(row)}>
-                    启动附件
-                  </Button>
-                )
-            : undefined
-        }
-      />
+            onEdit={moduleFields.length > 0 ? (row) => { setEditingRow(row); setDialogOpen(true); } : undefined}
+            onDelete={moduleFields.length > 0 ? handleDeleteOne : undefined}
+            onBatchDelete={moduleFields.length > 0 ? handleBatchDelete : undefined}
+            extraRowActions={
+              module.key === "projects" && canManageProjectMembers
+                ? (row) => (
+                    <>
+                      <Button type="link" size="small" onClick={() => openAttachmentModal(row)}>
+                        启动附件
+                      </Button>
+                      <Button type="link" size="small" onClick={() => openMemberModal(row)}>
+                        成员权限
+                      </Button>
+                    </>
+                  )
+                : module.key === "projects"
+                  ? (row) => (
+                      <Button type="link" size="small" onClick={() => openAttachmentModal(row)}>
+                        启动附件
+                      </Button>
+                    )
+                : undefined
+            }
+          />
+        </>
+      )}
 
       <Modal open={dialogOpen} onCancel={() => setDialogOpen(false)} footer={null} width={980} destroyOnClose>
         <DynamicForm

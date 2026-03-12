@@ -8,6 +8,7 @@ const dateString = z.string().min(8);
 const wbsStatusValues = ["未开始", "进行中", "已完成", "延期"] as const;
 const reportType = z.enum(["WEEKLY", "MONTHLY"]);
 const reportStatus = z.enum(["DRAFT", "SUBMITTED"]);
+const planningItemType = z.enum(["功能开发", "数据处理", "材料编写", "会议协调", "排查修复", "其他事项"]);
 const wbsCodePattern = /^\d+(?:\.\d+)*$/;
 const uuidLike = z.string().min(1);
 
@@ -61,9 +62,19 @@ export const validateWbsPlanSchema = z.object({
 
 export const quickWbsSuggestionSchema = z.object({
   projectId: z.string().min(1),
+  itemType: planningItemType,
   prompt: z.string().trim().min(2).max(200),
-  mode: z.enum(["light", "standard", "complete"]).default("standard"),
-  targetStage: stage.optional()
+  plannedStartDate: dateString,
+  plannedEndDate: dateString,
+  mode: z.enum(["light", "standard", "complete"]).default("standard")
+}).superRefine((input, ctx) => {
+  if (new Date(input.plannedEndDate).getTime() < new Date(input.plannedStartDate).getTime()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["plannedEndDate"],
+      message: "计划完成时间不得早于计划开始时间"
+    });
+  }
 });
 
 export const updateWbsStatusSchema = z.object({

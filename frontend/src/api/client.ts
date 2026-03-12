@@ -83,11 +83,20 @@ export interface ProjectAttachmentItem {
 }
 
 export interface QuickWbsSuggestionResult {
+  itemType: "功能开发" | "数据处理" | "材料编写" | "会议协调" | "排查修复" | "其他事项";
   intent: "新增" | "修复" | "优化" | "合规";
   mode: "light" | "standard" | "complete";
-  targetStage: "启动" | "规划" | "执行" | "验收";
   normalizedPrompt: string;
+  requirementSummary: string;
+  todos: Array<{
+    title: string;
+    workPackage: string;
+    stage: "启动" | "规划" | "执行" | "验收";
+    detail: string;
+    deliverable: string;
+  }>;
   reason: string;
+  wbsDrafts: Array<Record<string, unknown>>;
   items: Array<Record<string, unknown>>;
 }
 
@@ -285,9 +294,11 @@ export const api = {
     ),
   quickSuggestWbs: (payload: {
     projectId: string;
+    itemType: "功能开发" | "数据处理" | "材料编写" | "会议协调" | "排查修复" | "其他事项";
     prompt: string;
+    plannedStartDate: string;
+    plannedEndDate: string;
     mode?: "light" | "standard" | "complete";
-    targetStage?: "启动" | "规划" | "执行" | "验收";
   }) =>
     request<QuickWbsSuggestionResult>("/wbs/quick-suggestions", {
       method: "POST",

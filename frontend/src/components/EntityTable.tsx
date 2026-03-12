@@ -9,6 +9,7 @@ interface Props {
   rows: Record<string, unknown>[];
   columnLabels?: Record<string, string>;
   tableVariant?: "default" | "element-like";
+  onView?: (row: Record<string, unknown>) => void;
   onEdit?: (row: Record<string, unknown>) => void;
   onDelete?: (row: Record<string, unknown>) => void;
   onBatchDelete?: (selectedRows: Record<string, unknown>[]) => void;
@@ -35,6 +36,7 @@ export function EntityTable({
   rows,
   columnLabels,
   tableVariant = "default",
+  onView,
   onEdit,
   onDelete,
   onBatchDelete,
@@ -78,17 +80,22 @@ export function EntityTable({
       key: field,
       ellipsis: true
     }));
-    if (onEdit || onDelete || extraRowActions) {
+    if (onView || onEdit || onDelete || extraRowActions) {
       cols.push({
         title: "操作",
         key: "actions",
-        width: 260,
+        width: 320,
         fixed: "right",
         render: (_, record) => {
           const row = (record._raw ?? null) as Record<string, unknown> | null;
           if (!row) return null;
           return (
             <Space size={8}>
+              {onView ? (
+                <Button type="link" size="small" onClick={() => onView(row)}>
+                  详情
+                </Button>
+              ) : null}
               {extraRowActions ? extraRowActions(row) : null}
               {onEdit ? (
                 <Button type="link" size="small" onClick={() => onEdit(row)}>
@@ -106,7 +113,7 @@ export function EntityTable({
       });
     }
     return cols;
-  }, [dataFields, columnLabels, onEdit, onDelete, extraRowActions]);
+  }, [dataFields, columnLabels, onView, onEdit, onDelete, extraRowActions]);
 
   const rowSelection = useMemo<NonNullable<TableProps<Record<string, unknown>>["rowSelection"]>>(
     () => ({

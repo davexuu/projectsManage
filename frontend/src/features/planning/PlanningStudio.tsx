@@ -228,6 +228,42 @@ export function PlanningStudio({ projectId, projects, schemas }: Props) {
     [wbsRows]
   );
 
+  const taskById = useMemo(() => new Map(wbsRows.map((row) => [row.id, row])), [wbsRows]);
+
+  const successorIdsByTask = useMemo(() => {
+    const map = new Map<string, string[]>();
+    wbsRows.forEach((row) => {
+      (row.predecessorTaskIds ?? []).forEach((predecessorId) => {
+        const list = map.get(predecessorId) || [];
+        list.push(row.id);
+        map.set(predecessorId, list);
+      });
+    });
+    return map;
+  }, [wbsRows]);
+
+  const selectedTask = useMemo(() => wbsRows.find((row) => row.id === selectedTaskId) ?? null, [wbsRows, selectedTaskId]);
+  const selectedMilestone = useMemo(
+    () => milestoneRows.find((row) => row.id === selectedMilestoneId) ?? null,
+    [milestoneRows, selectedMilestoneId]
+  );
+
+  const selectedTaskPredecessors = useMemo(
+    () =>
+      (selectedTask?.predecessorTaskIds ?? [])
+        .map((id) => taskById.get(id))
+        .filter((item): item is WbsTaskRow => Boolean(item)),
+    [selectedTask, taskById]
+  );
+
+  const selectedTaskSuccessors = useMemo(
+    () =>
+      (selectedTask ? successorIdsByTask.get(selectedTask.id) ?? [] : [])
+        .map((id) => taskById.get(id))
+        .filter((item): item is WbsTaskRow => Boolean(item)),
+    [selectedTask, successorIdsByTask, taskById]
+  );
+
   if (!projectId) {
     return (
       <Card>
@@ -351,6 +387,100 @@ export function PlanningStudio({ projectId, projects, schemas }: Props) {
         }}
       />
 
+      {selectedTask ? (
+        <Card title='任务详情（当前选中）'>
+          <Space direction='vertical' size={10} style={{ width: '100%' }}>
+            <Space wrap>
+              <Typography.Text strong>
+                {selectedTask.wbsCode ? `${selectedTask.wbsCode} ${selectedTask.taskName}` : selectedTask.taskName}
+              </Typography.Text>
+              <Tag color='processing'>{selectedTask.currentStatus}</Tag>
+              <Tag>{selectedTask.level1Stage}</Tag>
+            </Space>
+            <Typography.Text type='secondary'>
+              计划时间：{formatDate(selectedTask.plannedStartDate)} ~ {formatDate(selectedTask.plannedEndDate)}；责任人：{selectedTask.taskOwner || '-'}
+            </Typography.Text>
+            <Space align='start' wrap>
+              <Typography.Text type='secondary'>紧前任务：</Typography.Text>
+              {selectedTaskPredecessors.length > 0 ? (
+                selectedTaskPredecessors.map((item) => (
+                  <Tag
+                    key={item.id}
+                    color='blue'
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => {
+                      setSelectedTaskId(item.id);
+                      setSelectedMilestoneId('');
+                    }}
+                  >
+                    {item.wbsCode ? `${item.wbsCode} ${item.taskName}` : item.taskName}
+                  </Tag>
+                ))
+              ) : (
+                <Typography.Text>-</Typography.Text>
+              )}
+            </Space>
+            <Space align='start' wrap>
+              <Typography.Text type='secondary'>紧后任务：</Typography.Text>
+              {selectedTaskSuccessors.length > 0 ? (
+                selectedTaskSuccessors.map((item) => (
+                  <Tag
+                    key={item.id}
+                    color='cyan'
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => {
+                      setSelectedTaskId(item.id);
+                      setSelectedMilestoneId('');
+                    }}
+                  >
+                    {item.wbsCode ? `${item.wbsCode} ${item.taskName}` : item.taskName}
+                  </Tag>
+                ))
+              ) : (
+                <Typography.Text>-</Typography.Text>
+              )}
+            </Space>
+          </Space>
+        </Card>
+      ) : null}
+
+      {selectedMilestone ? (
+        <Card title='里程碑详情（当前选中）'>
+          <Space direction='vertical' size={10} style={{ width: '100%' }}>
+            <Space wrap>
+              <Typography.Text strong>
+                {selectedMilestone.milestoneCode} {selectedMilestone.milestoneName}
+              </Typography.Text>
+              <Tag color='purple'>{selectedMilestone.currentStatus}</Tag>
+              <Tag>{selectedMilestone.level1Stage}</Tag>
+            </Space>
+            <Typography.Text type='secondary'>
+              计划完成：{formatDate(selectedMilestone.plannedFinishDate)}
+            </Typography.Text>
+            <Space align='start' wrap>
+              <Typography.Text type='secondary'>支撑任务：</Typography.Text>
+              {(selectedMilestone.linkedTaskSummaries?.length ?? 0) > 0 ? (
+                selectedMilestone.linkedTaskSummaries?.map((item) => (
+                  <Tag
+                    key={item.id}
+                    color='geekblue'
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => {
+                      setSelectedTaskId(item.id);
+                      setSelectedMilestoneId('');
+                    }}
+                  >
+                    {item.wbsCode ? `${item.wbsCode} ${item.taskName}` : item.taskName}
+                  </Tag>
+                ))
+              ) : (
+                <Typography.Text>{selectedMilestone.linkWarning || '-'}</Typography.Text>
+              )}
+            </Space>
+          </Space>
+        </Card>
+      ) : null}
+
       <Modal open={wbsModalOpen} onCancel={() => setWbsModalOpen(false)} footer={null} width={980} destroyOnClose>
         <DynamicForm
           fields={wbsFields}
@@ -365,9 +495,11 @@ export function PlanningStudio({ projectId, projects, schemas }: Props) {
           onGenerateWbsSuggestions={async (prompt, options) => {
             return api.quickSuggestWbs({
               projectId,
+              itemType: options?.itemType ?? '功能开发',
               prompt,
-              mode: options?.mode,
-              targetStage: options?.targetStage
+              plannedStartDate: options?.plannedStartDate ?? dayjs().format('YYYY-MM-DD'),
+              plannedEndDate: options?.plannedEndDate ?? dayjs().add(4, 'day').format('YYYY-MM-DD'),
+              mode: options?.mode
             });
           }}
           onBatchSubmit={handleBatchSubmit}

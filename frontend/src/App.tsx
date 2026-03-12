@@ -24,6 +24,7 @@ import type { LoginUser } from "./features/auth/LoginPanel";
 import type { DictionaryItem } from "./features/system/DictionaryManager";
 import type { OrganizationNode } from "./features/system/OrganizationManager";
 import { ModuleRoute } from "./features/module/ModuleRoute";
+import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 import { PROCESS_NAVIGATION, type ProcessKey, resolveProcessMenuKey } from "./features/process/navigation-config";
 import { FormSchemaMap, ModuleConfig } from "./types";
 import { getErrorMessage } from "./utils/errors";
@@ -413,6 +414,27 @@ export default function App() {
 
   const startDate = timeRange[0] ? timeRange[0].format("YYYY-MM-DD") : undefined;
   const endDate = timeRange[1] ? timeRange[1].format("YYYY-MM-DD") : undefined;
+  const moduleRouteElement = (
+    <ModuleRoute
+      moduleMap={moduleMap}
+      schemas={schemas}
+      projects={projects}
+      dictItems={dictItems}
+      departmentOptions={departmentOptions}
+      departmentTree={orgTree}
+      userOptions={userOptions}
+      yearOptions={yearOptions}
+      selectedProjectId={selectedProjectId}
+      rows={rows}
+      onModuleChange={setActiveModuleKey}
+      onCreate={createRecord}
+      onUpdate={updateRecord}
+      onDelete={deleteRecord}
+      onReload={reloadModuleData}
+      canManageProjectMembers={user.role === "ADMIN" || user.role === "PM"}
+      memberUserOptions={users}
+    />
+  );
 
   return (
     <Layout style={{ height: "100vh", overflow: "hidden" }}>
@@ -498,8 +520,9 @@ export default function App() {
             </Card>
           ) : null}
 
-          <Suspense fallback={<Card><Spin /></Card>}>
-            <Routes>
+          <RouteErrorBoundary resetKey={`${location.pathname}${location.search}`}>
+            <Suspense fallback={<Card><Spin /></Card>}>
+              <Routes>
               <Route path="/" element={<Navigate to="/mission-control" replace />} />
               <Route path="/workspace/my-projects" element={<WorkspacePanel mode="my-projects" projects={projects} dashboard={dashboard} />} />
               <Route path="/workspace/todo-alerts" element={<WorkspacePanel mode="todo-alerts" projects={projects} dashboard={dashboard} />} />
@@ -522,8 +545,8 @@ export default function App() {
                 path="/planning-studio"
                 element={<PlanningStudio projectId={selectedProjectId} projects={projects} schemas={schemas} />}
               />
-              <Route path="/module/wbs" element={<Navigate to="/planning-studio" replace />} />
-              <Route path="/module/milestones" element={<Navigate to="/planning-studio" replace />} />
+              <Route path="/module/progress-records" element={<Navigate to="/module/progressRecords" replace />} />
+              <Route path="/module/status-assessments" element={<Navigate to="/module/statusAssessments" replace />} />
               <Route path="/process/start" element={<ProcessWorkspace processKey="start" projectId={selectedProjectId} onNavigate={navigate} />} />
               <Route path="/process/plan" element={<ProcessWorkspace processKey="plan" projectId={selectedProjectId} onNavigate={navigate} />} />
               <Route
@@ -559,8 +582,8 @@ export default function App() {
                 element={<GanttChart projectId={selectedProjectId} stage={stageFilter || undefined} startDate={startDate} endDate={endDate} />}
               />
             <Route path="/legacy/dashboard" element={<Navigate to="/mission-control" replace />} />
-            <Route path="/legacy/wbs" element={<Navigate to="/planning-studio" replace />} />
-            <Route path="/legacy/milestones" element={<Navigate to="/planning-studio" replace />} />
+            <Route path="/legacy/wbs" element={<Navigate to="/module/wbs" replace />} />
+            <Route path="/legacy/milestones" element={<Navigate to="/module/milestones" replace />} />
             <Route
               path="/import"
               element={
@@ -661,36 +684,15 @@ export default function App() {
                 />
               }
             />
-            <Route
-              path="/module/:moduleKey"
-              element={
-                <ModuleRoute
-                  moduleMap={moduleMap}
-                  schemas={schemas}
-                  projects={projects}
-                  dictItems={dictItems}
-                  departmentOptions={departmentOptions}
-                  departmentTree={orgTree}
-                  userOptions={userOptions}
-                  yearOptions={yearOptions}
-                  selectedProjectId={selectedProjectId}
-                  rows={rows}
-                  onModuleChange={setActiveModuleKey}
-                  onCreate={createRecord}
-                  onUpdate={updateRecord}
-                  onDelete={deleteRecord}
-                  onReload={reloadModuleData}
-                  canManageProjectMembers={user.role === "ADMIN" || user.role === "PM"}
-                  memberUserOptions={users}
-                />
-              }
-            />
+            <Route path="/module/:moduleKey/:recordId" element={moduleRouteElement} />
+            <Route path="/module/:moduleKey" element={moduleRouteElement} />
             <Route path="/legacy/kanban" element={<Navigate to="/kanban" replace />} />
             <Route path="/legacy/burndown" element={<Navigate to="/burndown" replace />} />
             <Route path="/legacy/gantt" element={<Navigate to="/planning-studio" replace />} />
             <Route path="*" element={<Navigate to="/mission-control" replace />} />
-            </Routes>
-          </Suspense>
+              </Routes>
+            </Suspense>
+          </RouteErrorBoundary>
         </Content>
       </Layout>
     </Layout>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Card, Col, Empty, Row, Space, message } from 'antd';
 import { api } from '../../api/client';
 import { getErrorMessage } from '../../utils/errors';
+import { resolveModulePathByEndpoint } from '../module/route-utils';
 import { DrilldownDrawer } from './DrilldownDrawer';
 import { KPI_DEFAULT_FILTERS, KPI_DRILLDOWN_CONFIG, ROLE_KPI_CONFIG } from './config';
 import { KpiCard } from './KpiCard';
@@ -105,7 +106,25 @@ export function MissionControlPage({ role, projectId, dashboard, onNavigate }: P
       projectId,
       ...KPI_DEFAULT_FILTERS[kpiKey]
     });
-    onNavigate(`/module/${config.endpoint === 'status-assessments' ? 'statusAssessments' : config.endpoint}?${params.toString()}`);
+    onNavigate(`${resolveModulePathByEndpoint(config.endpoint)}?${params.toString()}`);
+  };
+
+  const handleOpenDetail = (kpiKey: KpiKey, row: Record<string, unknown>) => {
+    const rowId = String(row.id ?? '').trim();
+    if (!rowId) {
+      message.warning('当前实例缺少ID，无法打开详情');
+      return;
+    }
+    sessionStorage.setItem(
+      'mission-control:return-state',
+      JSON.stringify({ kpiKey, scrollY: window.scrollY, projectId })
+    );
+    const config = KPI_DRILLDOWN_CONFIG[kpiKey];
+    const params = new URLSearchParams({
+      projectId,
+      ...KPI_DEFAULT_FILTERS[kpiKey]
+    });
+    onNavigate(`${resolveModulePathByEndpoint(config.endpoint)}/${encodeURIComponent(rowId)}?${params.toString()}`);
   };
 
   useEffect(() => {
@@ -174,6 +193,10 @@ export function MissionControlPage({ role, projectId, dashboard, onNavigate }: P
         loading={loading}
         onClose={() => setDrawerOpen(false)}
         onViewAll={handleViewAll}
+        onOpenDetail={(row) => {
+          if (!activeKpi) return;
+          handleOpenDetail(activeKpi, row);
+        }}
       />
     </Space>
   );
